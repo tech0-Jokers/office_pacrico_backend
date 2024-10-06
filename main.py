@@ -39,7 +39,6 @@ app.add_middleware(
 
 # お菓子のデータモデル（リクエスト/レスポンス用）
 class Candy(BaseModel):
-    id: int
     name: str
     price: int
     image: str
