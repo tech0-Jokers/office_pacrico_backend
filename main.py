@@ -31,7 +31,10 @@ app = FastAPI()
 # CORS ミドルウェアの追加
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Next.js の URL
+    allow_origins=[
+        "http://localhost:3000",  # 開発時のローカルURL
+        "https://office-pacrico-frontend.vercel.app"  # VercelでデプロイされたフロントエンドのURL
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
