@@ -34,7 +34,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",  # 開発時のローカルURL
         "https://office-pacrico-frontend.vercel.app",  # VercelでデプロイされたフロントエンドのURL
-        "https://office-pacrico-user-frontend.vercel.app/" #Vercelでデプロイされたユーザー用のフロントエンドのURL
+        "https://office-pacrico-user-frontend.vercel.app" #Vercelでデプロイされたユーザー用のフロントエンドのURL
     ],
     allow_credentials=True,
     allow_methods=["*"],
