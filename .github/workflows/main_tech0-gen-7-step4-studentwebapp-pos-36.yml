@@ -1,69 +1,87 @@
-# Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
-# More GitHub Actions for Azure: https://github.com/Azure/actions
-# More info on Python, GitHub Actions, and Azure App Service: https://aka.ms/python-webapps-actions
+# Azure Web Apps Deployに関するドキュメント: https://github.com/Azure/webapps-deploy
+# Azure向けの他のGitHub Actions: https://github.com/Azure/actions
+# Python、GitHub Actions、Azure App Serviceに関する詳細情報: https://aka.ms/python-webapps-actions
 
+# このワークフローの名前を定義
 name: Build and deploy Python app to Azure Web App - tech0-gen-7-step4-studentwebapp-pos-36
 
+# ワークフローをトリガーする条件を設定
 on:
+  # mainブランチに変更がプッシュされたときに実行
   push:
     branches:
       - main
+  # 手動でワークフローを実行できるようにする
   workflow_dispatch:
 
+# ジョブの設定 (ジョブ名: build)
 jobs:
   build:
+    # ジョブが実行される環境を指定。ここでは最新のUbuntu環境
     runs-on: ubuntu-latest
 
     steps:
+      # GitHubリポジトリの内容をチェックアウト (取得) してワークフロー内で使用可能にする
       - uses: actions/checkout@v4
 
+      # Pythonのバージョンを設定 (ここではPython 3.12を使用)
       - name: Set up Python version
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
 
+      # 仮想環境を作成して開始する
       - name: Create and start virtual environment
         run: |
-          python -m venv venv
-          source venv/bin/activate
-      
+          python -m venv venv  # 仮想環境を作成
+          source venv/bin/activate  # 仮想環境を有効化
+
+      # 必要な依存パッケージをインストール
       - name: Install dependencies
         run: pip install -r requirements.txt
-        
-      # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
 
+      # (オプション) テストを実行するステップを追加できます (例えば、PyTestやDjangoのテストスイート)
+
+      # デプロイ用にアーティファクト(成果物)をZIPファイルに圧縮
       - name: Zip artifact for deployment
         run: zip release.zip ./* -r
 
+      # ZIPファイルを次のジョブで利用できるようにアップロード
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
         with:
-          name: python-app
+          name: python-app # アーティファクトの名前
           path: |
-            release.zip
-            !venv/
+            release.zip  # アップロードするファイル
+            !venv/  # 仮想環境のファイルは含めない
 
+  # デプロイジョブの設定 (ジョブ名: deploy)
   deploy:
+    # デプロイも最新のUbuntu環境で実行
     runs-on: ubuntu-latest
+    # buildジョブが完了した後に実行する
     needs: build
+    # デプロイの対象環境とURLを設定
     environment:
-      name: 'Production'
+      name: "Production"
       url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
-    
+
     steps:
+      # buildジョブからアップロードされたアーティファクトをダウンロード
       - name: Download artifact from build job
         uses: actions/download-artifact@v4
         with:
           name: python-app
 
+      # デプロイ用にZIPファイルを解凍
       - name: Unzip artifact for deployment
         run: unzip release.zip
 
-      
-      - name: 'Deploy to Azure Web App'
+      # Azure Web Appにアプリをデプロイ
+      - name: "Deploy to Azure Web App"
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
         with:
-          app-name: 'tech0-gen-7-step4-studentwebapp-pos-36'
-          slot-name: 'Production'
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_490367D384EF47B48AFF14A2A68C54B4 }}
+          app-name: "tech0-gen-7-step4-studentwebapp-pos-36" # Azureでのアプリケーションの名前
+          slot-name: "Production" # デプロイするスロット (通常はProduction)
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_490367D384EF47B48AFF14A2A68C54B4 }} # シークレットで管理されたAzureの公開プロファイル情報
