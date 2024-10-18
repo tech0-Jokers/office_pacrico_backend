@@ -44,16 +44,20 @@ jobs:
 
       # デプロイ用にアーティファクト(成果物)をZIPファイルに圧縮
       - name: Zip artifact for deployment
-        run: zip release.zip ./* -r
+        run: |
+          # すべての必要なファイルをZIPに圧縮。venvや不要なファイルは除外
+          zip -r release.zip * -x "venv/*" "*.git*" "*.pyc" "__pycache__/*" "build/*" "dist/*" "*.egg-info/*" ".env" ".venv" "env/" "venv/" "*.ipynb_checkpoints/*"
+
+      # ZIPファイルの内容を確認 (デバッグ用)
+      - name: List contents of release.zip
+        run: unzip -l release.zip # ZIPファイルの中身をリスト表示して確認
 
       # ZIPファイルを次のジョブで利用できるようにアップロード
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
         with:
-          name: python-app # アーティファクトの名前
-          path: |
-            release.zip  # アップロードするファイル
-            !venv/  # 仮想環境のファイルは含めない
+          name: python-app # アーティファクトの名前。後のジョブでこの名前を指定してダウンロードする
+          path: release.zip # アップロードするZIPファイル
 
   # デプロイジョブの設定 (ジョブ名: deploy)
   deploy:
@@ -71,11 +75,11 @@ jobs:
       - name: Download artifact from build job
         uses: actions/download-artifact@v4
         with:
-          name: python-app
+          name: python-app # buildジョブでアップロードしたアーティファクトの名前と一致する必要がある
 
       # デプロイ用にZIPファイルを解凍
       - name: Unzip artifact for deployment
-        run: unzip release.zip
+        run: unzip release.zip # ダウンロードしたZIPファイルを解凍
 
       # Azure Web Appにアプリをデプロイ
       - name: "Deploy to Azure Web App"
