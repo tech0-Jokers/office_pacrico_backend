@@ -63,3 +63,8 @@ def get_db():
 @app.get("/candies", response_model=list[Candy])
 def get_candies(db: Session = Depends(get_db)):
     return db.query(CandyDB).all()
+
+# ルートエンドポイント: こんにちはを表示
+@app.get("/")
+def read_root():
+    return {"message": "こんにちは"}
