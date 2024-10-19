@@ -1,32 +1,56 @@
+import os
+import logging
+from dotenv import load_dotenv
+
+
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+
+from pydantic import BaseModel  # Pydanticモデルをインポート
+from create_db import Product  # 商品モデルをインポート
+
 from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 
-# SQLite データベースの設定
-SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+# .env.local ファイルを明示的に指定して環境変数を読み込む
+load_dotenv(dotenv_path=".env.local")
 
+# ロガーのセットアップ
+logger = logging.getLogger("uvicorn.error")
+
+# デバッグ用: DATABASE_URL が読み込まれているか確認
+print(f"DATABASE_URL: {os.getenv('DATABASE_URL')}")
+
+# データベース接続設定
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    # DATABASE_URL が未設定の場合は SQLite を使う
+    SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
+else:
+    # DATABASE_URL が設定されている場合はその URL を使う
+    SQLALCHEMY_DATABASE_URL = DATABASE_URL
+
+# データベースエンジンの作成
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL, 
+    connect_args={"check_same_thread": False} if "sqlite" in SQLALCHEMY_DATABASE_URL else {}
+)
+
+# セッションの設定
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# お菓子のテーブル定義
-class CandyDB(Base):
-    __tablename__ = "candies"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)
-    price = Column(Integer)
-    image = Column(String)
-    description = Column(String)
+# デバッグ用: 現在のデータベース接続 URL を表示
+logger.info(f"Using database URL: {SQLALCHEMY_DATABASE_URL}")
 
 # データベースのテーブルを作成
 Base.metadata.create_all(bind=engine)
 
-# FastAPIの初期化
+# FastAPIの作成と初期化
 app = FastAPI()
+
 
 # CORS ミドルウェアの追加
 app.add_middleware(
@@ -44,6 +68,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# お菓子のテーブル定義
+class CandyDB(Base):
+    __tablename__ = "candies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), index=True)  # VARCHAR(255)
+    price = Column(Integer)
+    image = Column(String(255))  # VARCHAR(255)
+    description = Column(String(500))  # VARCHAR(500)
+
+
 # お菓子のデータモデル（リクエスト/レスポンス用）
 class Candy(BaseModel):
     id: int
@@ -60,6 +95,12 @@ def get_db():
     finally:
         db.close()
 
+# Pydanticモデルの定義
+class ProductCreate(BaseModel):
+    barcode: str
+    name: str
+
+
 # エンドポイント: お菓子のデータを取得する
 @app.get("/candies", response_model=list[Candy])
 def get_candies(db: Session = Depends(get_db)):
@@ -69,6 +110,7 @@ def get_candies(db: Session = Depends(get_db)):
 @app.get("/")
 def read_root():
     return {"message": "こんにちは"}
+
 
 # Pydanticモデルの定義
 class ProductCreate(BaseModel):
