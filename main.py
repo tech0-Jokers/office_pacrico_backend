@@ -68,3 +68,43 @@ def get_candies(db: Session = Depends(get_db)):
 @app.get("/")
 def read_root():
     return {"message": "こんにちは"}
+
+# Pydanticモデルの定義
+class ProductCreate(BaseModel):
+    barcode: str
+    name: str
+
+# バーコードから商品名を取得するエンドポイント
+@app.get("/get_product_name")
+def get_product_name(barcode: str, db: Session = Depends(get_db)):
+    try:
+        # バーコードに基づいて商品を検索
+        product = db.execute(select(Product).where(Product.barcode_number == barcode)).scalars().first()
+        if product:
+            return {"product_name": product.product_name}
+        else:
+            raise HTTPException(status_code=404, detail="商品が見つかりません")
+    except Exception as e:
+        logger.error(f"商品検索時のエラー: {str(e)}")
+        raise HTTPException(status_code=500, detail="サーバー内部エラー")
+
+# 新しい商品を商品マスタに追加するエンドポイント（名前とバーコードのみ）
+@app.post("/add_product/")
+def add_product(product: ProductCreate, db: Session = Depends(get_db)):
+    print(product.barcode)
+    print(product.name)
+    try:
+        # 商品がすでに存在するか確認
+        existing_product = db.execute(select(Product).where(Product.barcode_number == product.barcode)).scalars().first()
+        if not existing_product:
+            # 新しい商品を追加（名前とバーコードのみ）
+            new_product = Product(
+                barcode_number=product.barcode,
+                product_name=product.name
+            )
+            db.add(new_product)
+            db.commit()
+            return {"message": "商品が追加されました"}
+    except Exception as e:
+        logger.error(f"商品追加時のエラー: {str(e)}")
+        raise HTTPException(status_code=500, detail="商品を追加できませんでした")
