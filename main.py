@@ -1,13 +1,16 @@
 import os
+from pytz import timezone
+from datetime import datetime
+import pytz
 import logging
 from dotenv import load_dotenv
-
+from datetime import datetime
 
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from pydantic import BaseModel  # Pydanticモデルをインポート
-from create_db import Product  # 商品モデルをインポート
+from create_db import Product, IncomingInfo, IncomingProduct
 
 from sqlalchemy import create_engine, Column, Integer, String, select
 from sqlalchemy.ext.declarative import declarative_base
@@ -51,7 +54,6 @@ Base.metadata.create_all(bind=engine)
 # FastAPIの作成と初期化
 app = FastAPI()
 
-
 # CORS ミドルウェアの追加
 app.add_middleware(
     CORSMiddleware,
@@ -60,7 +62,7 @@ app.add_middleware(
         "http://127.0.0.1:3000", # 開発時のローカルURL
         "https://office-pacrico-frontend.vercel.app",  # VercelでデプロイされたフロントエンドのURL
         "https://office-pacrico-user-frontend.vercel.app", #Vercelでデプロイされたユーザー用のフロントエンドのURL
-        "https://tech0-gen-7-step4-studentwebapp-pos-37-bxbfgkg5a7gwa7e9.eastus-01.azurewebsites.net" ,#Azureでデプロイされたユーザー用のフロントエンドのURL
+        "https://tech0-gen-7-step4-studentwebapp-pos-37-bxbfgkg5a7gwa7e9.eastus-01.azurewebsites.net", #Azureでデプロイされたユーザー用のフロントエンドのURL
         "https://tech0-gen-7-step4-studentwebapp-pos-35-cubpd9h4euh3g0d8.eastus-01.azurewebsites.net" #Azureでデプロイされたユーザー用のフロントエンドのURL
     ],
     allow_credentials=True,
@@ -100,6 +102,11 @@ class ProductCreate(BaseModel):
     barcode: str
     name: str
 
+# リクエストボディのためのPydanticモデルを定義
+class IncomingRegisterRequest(BaseModel):
+    price: float
+    items: list
+    entryDate: datetime
 
 # エンドポイント: お菓子のデータを取得する
 @app.get("/candies", response_model=list[Candy])
@@ -110,12 +117,6 @@ def get_candies(db: Session = Depends(get_db)):
 @app.get("/")
 def read_root():
     return {"message": "こんにちは"}
-
-
-# Pydanticモデルの定義
-class ProductCreate(BaseModel):
-    barcode: str
-    name: str
 
 # バーコードから商品名を取得するエンドポイント
 @app.get("/get_product_name")
@@ -151,3 +152,38 @@ def add_product(product: ProductCreate, db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"商品追加時のエラー: {str(e)}")
         raise HTTPException(status_code=500, detail="商品を追加できませんでした")
+
+@app.post("/recieving_register")
+async def register_incoming_products(request: IncomingRegisterRequest, db: Session = Depends(get_db)):
+    # 送信された entryDate を UTC から JST に変換
+    utc_time = request.entryDate  # entryDate は UTC と仮定
+    jst_timezone = pytz.timezone('Asia/Tokyo')
+    
+    # UTC を日本時間に変換
+    jst_time = utc_time.astimezone(jst_timezone)
+
+    # 入庫情報を挿入
+    incoming_info = IncomingInfo(
+        incoming_date=jst_time,  # 日本時間に変換した日時を使う
+        purchase_amount=request.price,
+        user_id=2  #仮
+    )
+    db.add(incoming_info)
+    db.commit()
+    db.refresh(incoming_info)
+
+    # 商品情報の挿入
+    for item in request.items:
+        product = db.query(Product).filter(Product.product_name == item["name"]).first()
+        if not product:
+            raise HTTPException(status_code=400, detail=f"商品 {item['name']} が見つかりません")
+        
+        incoming_product = IncomingProduct(
+            product_id=product.product_id,
+            incoming_id=incoming_info.incoming_id,
+            incoming_quantity=item["quantity"]
+        )
+        db.add(incoming_product)
+
+    db.commit()
+    return {"message": "商品が正常に登録されました"}
