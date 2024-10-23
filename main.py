@@ -113,6 +113,15 @@ class IncomingRegisterRequest(BaseModel):
 def get_candies(db: Session = Depends(get_db)):
     return db.query(CandyDB).all()
 
+# お菓子のデータをidを指定して取得するエンドポイント
+@app.get("/candies/{candy_id}", response_model=Candy)
+def get_candy(candy_id: int, db: Session = Depends(get_db)):
+    candy = db.query(CandyDB).filter(CandyDB.id == candy_id).first()
+    if not candy:
+        raise HTTPException(status_code=404, detail="お菓子が見つかりません")
+    return candy
+
+
 # ルートエンドポイント: こんにちはを表示
 @app.get("/")
 def read_root():
