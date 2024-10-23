@@ -187,3 +187,8 @@ async def register_incoming_products(request: IncomingRegisterRequest, db: Sessi
 
     db.commit()
     return {"message": "商品が正常に登録されました"}
+
+# アプリケーションの起動: 環境変数 PORT が指定されていればそれを使用
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 8000))  # 環境変数 PORT があればそれを使用し、なければデフォルトで8000を使用
+    app.run(host="0.0.0.0", port=port)
