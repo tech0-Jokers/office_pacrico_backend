@@ -4,7 +4,6 @@ from datetime import datetime
 import pytz
 import logging
 from dotenv import load_dotenv
-from datetime import datetime
 
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +14,26 @@ from create_db import Product, IncomingInfo, IncomingProduct
 from sqlalchemy import create_engine, Column, Integer, String, select
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
+
+# FastAPIの作成と初期化
+app = FastAPI()
+
+# CORS ミドルウェアの追加
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",  # 開発時のローカルURL
+        "http://127.0.0.1:3000", # 開発時のローカルURL
+        "https://office-pacrico-frontend.vercel.app",  # VercelでデプロイされたフロントエンドのURL
+        "https://office-pacrico-user-frontend.vercel.app", #Vercelでデプロイされたユーザー用のフロントエンドのURL
+        "https://office-paclico-user-frontend.vercel.app", #Vercelでデプロイされたユーザー用のフロントエンドのURL
+        "https://tech0-gen-7-step4-studentwebapp-pos-37-bxbfgkg5a7gwa7e9.eastus-01.azurewebsites.net", #Azureでデプロイされたユーザー用のフロントエンドのURL
+        "https://tech0-gen-7-step4-studentwebapp-pos-35-cubpd9h4euh3g0d8.eastus-01.azurewebsites.net" #Azureでデプロイされたユーザー用のフロントエンドのURL
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # .env.local ファイルを明示的に指定して環境変数を読み込む
 load_dotenv(dotenv_path=".env.local")
@@ -35,40 +54,71 @@ else:
     # DATABASE_URL が設定されている場合はその URL を使う
     SQLALCHEMY_DATABASE_URL = DATABASE_URL
 
-# データベースエンジンの作成
+# Candy用のデータベースエンジンの作成
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL, 
     connect_args={"check_same_thread": False} if "sqlite" in SQLALCHEMY_DATABASE_URL else {}
 )
 
-# セッションの設定
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
-
 # デバッグ用: 現在のデータベース接続 URL を表示
 logger.info(f"Using database URL: {SQLALCHEMY_DATABASE_URL}")
+
+# セッションの設定
+# SQLAlchemyのセッションを作成するためのファクトリ関数を定義します。
+# autocommit=False: トランザクションを自動的にコミットしないように設定します。
+# autoflush=False: セッションが自動的にフラッシュされないように設定します。
+# bind=engine: このセッションが使用するデータベースエンジンを指定します。
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# SQLAlchemyのベースクラスを作成します。
+# これにより、すべてのモデルクラスがこのベースクラスを継承することになります。
+Base = declarative_base()
 
 # データベースのテーブルを作成
 Base.metadata.create_all(bind=engine)
 
-# FastAPIの作成と初期化
-app = FastAPI()
+# DBセッションを取得する依存関係
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
-# CORS ミドルウェアの追加
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",  # 開発時のローカルURL
-        "http://127.0.0.1:3000", # 開発時のローカルURL
-        "https://office-pacrico-frontend.vercel.app",  # VercelでデプロイされたフロントエンドのURL
-        "https://office-pacrico-user-frontend.vercel.app", #Vercelでデプロイされたユーザー用のフロントエンドのURL
-        "https://tech0-gen-7-step4-studentwebapp-pos-37-bxbfgkg5a7gwa7e9.eastus-01.azurewebsites.net", #Azureでデプロイされたユーザー用のフロントエンドのURL
-        "https://tech0-gen-7-step4-studentwebapp-pos-35-cubpd9h4euh3g0d8.eastus-01.azurewebsites.net" #Azureでデプロイされたユーザー用のフロントエンドのURL
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+# チョコレートのデータベースを読み込む
+CHOCOLATES_DATABASE_URL = "sqlite:///./chocolate_data.db"
+
+# チョコレートのデータベースエンジンの作成
+chocolates_engine = create_engine(
+    CHOCOLATES_DATABASE_URL,
+    connect_args={"check_same_thread": False} if "sqlite" in CHOCOLATES_DATABASE_URL else {}
 )
+
+# チョコレートのデータベースのセッションの設定
+chocolates_SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=chocolates_engine)
+
+
+# チョコレートデータベースセッションを取得する関数
+def get_chocolates_db():
+    db = chocolates_SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# 新たなベースクラスの作成
+ChocolatesBase = declarative_base()
+
+
+# チョコレートのデータベースのテーブル定義
+class ChocolateDB(ChocolatesBase):
+    __tablename__ = "chocolate_data"
+    Index = Column(Integer, primary_key=True, index=True)
+    Product_Name = Column(String(255), index=True)
+    Image_Url = Column(String(255))
+
+# チョコレート用のテーブルを作成
+ChocolatesBase.metadata.create_all(bind=chocolates_engine)
 
 # お菓子のテーブル定義
 class CandyDB(Base):
@@ -89,14 +139,6 @@ class Candy(BaseModel):
     image: str
     description: str
 
-# DBセッションを取得する依存関係
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
 # Pydanticモデルの定義
 class ProductCreate(BaseModel):
     barcode: str
@@ -108,15 +150,41 @@ class IncomingRegisterRequest(BaseModel):
     items: list
     entryDate: datetime
 
-# エンドポイント: お菓子のデータを取得する
+# ルートエンドポイント: こんにちはを表示
+@app.get("/")
+def read_root():
+    return {"message": "こんにちはOffice Paclicoだよ!"}
+
+# お菓子データを取得するエンドポイント（Candy用）
 @app.get("/candies", response_model=list[Candy])
 def get_candies(db: Session = Depends(get_db)):
     return db.query(CandyDB).all()
 
-# ルートエンドポイント: こんにちはを表示
-@app.get("/")
-def read_root():
-    return {"message": "こんにちは"}
+# お菓子データをIDで取得するエンドポイント
+@app.get("/candies/{candy_id}", response_model=Candy)
+def get_candy(candy_id: int, db: Session = Depends(get_db)):
+    candy = db.query(CandyDB).filter(CandyDB.id == candy_id).first()
+    if not candy:
+        raise HTTPException(status_code=404, detail="お菓子が見つかりません")
+    return candy
+
+# チョコレートデータを取得するエンドポイント
+@app.get("/chocolates")
+def get_chocolates(db: Session = Depends(get_chocolates_db)):
+    chocolates = db.query(ChocolateDB).limit(6).all()
+    return chocolates
+
+# チョコレートデータを取得するエンドポイント
+@app.get("/chocolates/{chocolate_id}")
+def get_chocolate(chocolate_id: int, db: Session = Depends(get_chocolates_db)):
+    try:
+        chocolate = db.query(ChocolateDB).filter(ChocolateDB.Index == chocolate_id).first()
+        if not chocolate:
+            raise HTTPException(status_code=404, detail="チョコレートが見つかりません")
+        return chocolate
+    except Exception as e:
+        logger.error(f"チョコレートデータ取得エラー: {str(e)}")
+        raise HTTPException(status_code=500, detail="サーバー内部エラー")
 
 # バーコードから商品名を取得するエンドポイント
 @app.get("/get_product_name")
