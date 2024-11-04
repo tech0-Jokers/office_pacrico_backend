@@ -11,7 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel  # Pydanticモデルをインポート
 from create_db import Product, IncomingInfo, IncomingProduct
 
-from sqlalchemy import create_engine, Column, Integer, String, select
+from sqlalchemy import create_engine, Column, Integer, String, select, DECIMAL, ForeignKey
+
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 
@@ -35,11 +36,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ロガーのセットアップ
+logger = logging.getLogger("uvicorn.error")
+
 # .env.local ファイルを明示的に指定して環境変数を読み込む
 load_dotenv(dotenv_path=".env.local")
 
-# ロガーのセットアップ
-logger = logging.getLogger("uvicorn.error")
 
 # デバッグ用: DATABASE_URL が読み込まれているか確認
 print(f"DATABASE_URL: {os.getenv('DATABASE_URL')}")
@@ -130,6 +132,26 @@ class CandyDB(Base):
     image = Column(String(255))  # VARCHAR(255)
     description = Column(String(500))  # VARCHAR(500)
 
+class InventoryProduct(Base):
+    __tablename__ = 'Inventory_products'
+    product_id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organization.organization_id"), primary_key=True)
+    sales_amount = Column(DECIMAL(10, 2))
+    stock_quantity = Column(Integer)
+
+class IntegratedProduct(Base):
+    __tablename__ = 'integrated_products'
+    product_id = Column(Integer, primary_key=True)
+    meitex_product_id = Column(Integer, ForeignKey("MeitexProductMaster.meitex_product_id"))
+    independent_product_id = Column(Integer, ForeignKey("IndependentProductMaster.independent_product_id"))
+
+class MeitexProductMaster(Base):
+    __tablename__ = 'MeitexProductMaster'
+    meitex_product_id = Column(Integer, primary_key=True)
+    product_name = Column(String(255))
+    product_image_url = Column(String(255))
+
+
 
 # お菓子のデータモデル（リクエスト/レスポンス用）
 class Candy(BaseModel):
@@ -144,16 +166,50 @@ class ProductCreate(BaseModel):
     barcode: str
     name: str
 
-# リクエストボディのためのPydanticモデルを定義
 class IncomingRegisterRequest(BaseModel):
     price: float
     items: list
     entryDate: datetime
 
+class ProductResponse(BaseModel):
+    product_id: int
+    product_name: str
+    product_image_url: str
+    sales_amount: float
+    stock_quantity: int
+
+    class Config:
+        orm_mode = True  # SQLAlchemy オブジェクトをサポート
+        from_attributes = True  # 必要に応じて追加
+
 # ルートエンドポイント: こんにちはを表示
 @app.get("/")
 def read_root():
     return {"message": "こんにちはOffice Paclicoだよ!"}
+
+@app.get("/products/{organization_id}", response_model=list[ProductResponse])
+def get_products_by_organization(organization_id: int, db: Session = Depends(get_db)):
+    print(organization_id)
+    try:
+        products = db.query(
+            InventoryProduct.product_id,
+            MeitexProductMaster.product_name,
+            MeitexProductMaster.product_image_url,
+            InventoryProduct.sales_amount,
+            InventoryProduct.stock_quantity
+        ).join(IntegratedProduct, InventoryProduct.product_id == IntegratedProduct.product_id
+        ).join(MeitexProductMaster, IntegratedProduct.meitex_product_id == MeitexProductMaster.meitex_product_id
+        ).filter(InventoryProduct.organization_id == organization_id).all()
+
+        if not products:
+            print("miss")
+            raise HTTPException(status_code=404, detail="No products found for this organization")
+
+        # Pydantic モデルに変換して返す
+        return [ProductResponse.from_orm(product) for product in products]
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # お菓子データを取得するエンドポイント（Candy用）
 @app.get("/candies", response_model=list[Candy])
