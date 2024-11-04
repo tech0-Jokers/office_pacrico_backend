@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from typing import Optional
 from pydantic import BaseModel  # Pydanticモデルをインポート
-from create_db import Product, IncomingInfo, IncomingProduct,Message
+from create_db import Product, IncomingInfo, IncomingProduct
 
 
 from sqlalchemy import create_engine, Column, Integer, String, select, DECIMAL, ForeignKey
