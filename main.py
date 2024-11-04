@@ -1,6 +1,6 @@
 import os
 from pytz import timezone
-from datetime import datetime
+from datetime import datetime, timezone
 import pytz
 import logging
 from dotenv import load_dotenv
@@ -12,7 +12,6 @@ from typing import Optional
 from pydantic import BaseModel  # Pydanticモデルをインポート
 from create_db import Product, IncomingInfo, IncomingProduct
 
-from sqlalchemy import DateTime
 from sqlalchemy import create_engine, Column, Integer, String, select, DECIMAL, ForeignKey
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declarative_base
@@ -182,19 +181,19 @@ class ProductCreate(BaseModel):
 
 # メッセージモデルの定義
 class MessageCreate(BaseModel):
-    message: str
-    user_id: int
+    message_content: str
+    sender_user_id: int # 送信者のID
     receiver_user_id: int  # 受信者のID
     product_id: int  # 商品のID
 
 class Message(Base):
-    __tablename__ = 'messages'
+    __tablename__ = 'message'
     message_id = Column(Integer, primary_key=True, index=True)
     message_content = Column(String(500), nullable=False)
-    sender_user_id = Column(Integer, ForeignKey('user_info.user_id'), nullable=False)  # ユーザーテーブルがある場合
-    receiver_user_id = Column(Integer, ForeignKey('user_info.user_id'), nullable=False)  # ユーザーテーブルがある場合
-    product_id = Column(Integer, ForeignKey('product_master.product_id'), nullable=False)
-    send_date = Column(DateTime, default=datetime.utcnow)
+    sender_user_id = Column(Integer, ForeignKey('userinformation.user_id'), nullable=False)  # ユーザーテーブルがある場合
+    receiver_user_id = Column(Integer, ForeignKey('userinformation.user_id'), nullable=False)  # ユーザーテーブルがある場合
+    product_id = Column(Integer, ForeignKey('MeitexProductMaster.meitex_product_id'), nullable=False)
+    send_date = datetime.now(timezone.utc)  # UTCに統一
 
 class IncomingRegisterRequest(BaseModel):
     price: float
@@ -322,15 +321,18 @@ def add_product(product: ProductCreate, db: Session = Depends(get_db)):
 
 # 新しいメッセージを追加するエンドポイント
 @app.post("/add_message/")
-def add_message(message: MessageCreate, db: Session = Depends(get_db)):
+def add_message(message_data: MessageCreate, db: Session = Depends(get_db)):
+    print(f"Received message_data: {message_data}")
+    print(f"MessageCreate module: {MessageCreate.__module__}")
+    print(f"MessageCreate name: {MessageCreate.__name__}")
     try:
         # 新しいメッセージを追加
         new_message = Message(
-            message_content = message.message,
-            sender_user_id = message.user_id,
-            receiver_user_id = message.receiver_user_id,
-            product_id = message.product_id,
-            send_date = datetime.now(datetime.timezone.utc)  # UTCに統一
+            message_content=message_data.message_content,  # フィールド名を合わせる
+            sender_user_id=message_data.sender_user_id,    # フィールド名を合わせる
+            receiver_user_id=message_data.receiver_user_id,
+            product_id=message_data.product_id,
+            send_date = datetime.now(timezone.utc)  # UTCに統一
         )
         db.add(new_message)
         db.commit()
@@ -384,5 +386,6 @@ async def register_incoming_products(request: IncomingRegisterRequest, db: Sessi
 
 # アプリケーションの起動: 環境変数 PORT が指定されていればそれを使用
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 8000))  # 環境変数 PORT があればそれを使用し、なければデフォルトで8000を使用
-    app.run(host="0.0.0.0", port=port)
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port, reload=True)
