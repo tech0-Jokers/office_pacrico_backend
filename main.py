@@ -12,7 +12,7 @@ from typing import Optional
 from pydantic import BaseModel  # Pydanticモデルをインポート
 from create_db import Product, IncomingInfo, IncomingProduct
 
-
+from sqlalchemy import DateTime
 from sqlalchemy import create_engine, Column, Integer, String, select, DECIMAL, ForeignKey
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declarative_base
