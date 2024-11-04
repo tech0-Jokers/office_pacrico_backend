@@ -9,10 +9,11 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from pydantic import BaseModel  # Pydanticモデルをインポート
-from create_db import Product, IncomingInfo, IncomingProduct
+from create_db import Product, IncomingInfo, IncomingProduct,Message
+
 
 from sqlalchemy import create_engine, Column, Integer, String, select, DECIMAL, ForeignKey
-
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 
@@ -166,6 +167,22 @@ class ProductCreate(BaseModel):
     barcode: str
     name: str
 
+# メッセージモデルの定義
+class MessageCreate(BaseModel):
+    message: str
+    user_id: int
+    receiver_user_id: int  # 受信者のID
+    product_id: int  # 商品のID
+
+class Message(Base):
+    __tablename__ = 'messages'
+    message_id = Column(Integer, primary_key=True, index=True)
+    message_content = Column(String(500), nullable=False)
+    sender_user_id = Column(Integer, ForeignKey('user_info.user_id'), nullable=False)  # ユーザーテーブルがある場合
+    receiver_user_id = Column(Integer, ForeignKey('user_info.user_id'), nullable=False)  # ユーザーテーブルがある場合
+    product_id = Column(Integer, ForeignKey('product_master.product_id'), nullable=False)
+    send_date = Column(DateTime, default=datetime.utcnow)
+
 class IncomingRegisterRequest(BaseModel):
     price: float
     items: list
@@ -276,6 +293,33 @@ def add_product(product: ProductCreate, db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"商品追加時のエラー: {str(e)}")
         raise HTTPException(status_code=500, detail="商品を追加できませんでした")
+
+# 新しいメッセージを追加するエンドポイント
+@app.post("/add_message/")
+def add_message(message: MessageCreate, db: Session = Depends(get_db)):
+    try:
+        # 新しいメッセージを追加
+        new_message = Message(
+            message_content = message.message,
+            sender_user_id = message.user_id,
+            receiver_user_id = message.receiver_user_id,
+            product_id = message.product_id,
+            send_date = datetime.utcnow()  # UTCに統一
+        )
+        db.add(new_message)
+        db.commit()
+        db.refresh(new_message)
+        
+        logger.info(f"メッセージが追加されました: {new_message.message_id}")
+        return {"message": "メッセージが追加されました"}
+    
+    except IntegrityError as e:
+        logger.error(f"Integrity error when adding message: {str(e)}")
+        raise HTTPException(status_code=400, detail="メッセージの追加に失敗しました: 外部キーが無効です")
+    
+    except Exception as e:
+        logger.error(f"メッセージ追加時のエラー: {str(e)}")
+        raise HTTPException(status_code=500, detail="メッセージを追加できませんでした")
 
 @app.post("/recieving_register")
 async def register_incoming_products(request: IncomingRegisterRequest, db: Session = Depends(get_db)):
