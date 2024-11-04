@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+from typing import Optional
 from pydantic import BaseModel  # Pydanticモデルをインポート
 from create_db import Product, IncomingInfo, IncomingProduct,Message
 
@@ -16,6 +17,7 @@ from sqlalchemy import create_engine, Column, Integer, String, select, DECIMAL, 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
+
 
 # FastAPIの作成と初期化
 app = FastAPI()
@@ -136,7 +138,7 @@ class CandyDB(Base):
 class InventoryProduct(Base):
     __tablename__ = 'Inventory_products'
     product_id = Column(Integer, primary_key=True)
-    organization_id = Column(Integer, ForeignKey("organization.organization_id"), primary_key=True)
+    organization_id = Column(Integer, ForeignKey("Organization.organization_id"), primary_key=True)
     sales_amount = Column(DECIMAL(10, 2))
     stock_quantity = Column(Integer)
 
@@ -151,6 +153,17 @@ class MeitexProductMaster(Base):
     meitex_product_id = Column(Integer, primary_key=True)
     product_name = Column(String(255))
     product_image_url = Column(String(255))
+    product_explanation = Column(String(255))
+    product_category_id = Column(Integer)
+
+class IndependentProductMaster(Base):
+    __tablename__ = 'IndependentProductMaster'
+    independent_product_id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("Organization.organization_id"))
+    product_name = Column(String(255))
+    product_image_url = Column(String(255))
+    product_explanation = Column(String(255))
+    product_category_id = Column(Integer)
 
 
 
@@ -191,7 +204,7 @@ class IncomingRegisterRequest(BaseModel):
 class ProductResponse(BaseModel):
     product_id: int
     product_name: str
-    product_image_url: str
+    product_image_url: Optional[str]
     sales_amount: float
     stock_quantity: int
 
@@ -208,7 +221,7 @@ def read_root():
 def get_products_by_organization(organization_id: int, db: Session = Depends(get_db)):
     print(organization_id)
     try:
-        products = db.query(
+        meitex_products = db.query(
             InventoryProduct.product_id,
             MeitexProductMaster.product_name,
             MeitexProductMaster.product_image_url,
@@ -218,12 +231,25 @@ def get_products_by_organization(organization_id: int, db: Session = Depends(get
         ).join(MeitexProductMaster, IntegratedProduct.meitex_product_id == MeitexProductMaster.meitex_product_id
         ).filter(InventoryProduct.organization_id == organization_id).all()
 
-        if not products:
+        independent_products = db.query(
+            InventoryProduct.product_id,
+            IndependentProductMaster.product_name,
+            IndependentProductMaster.product_image_url,
+            InventoryProduct.sales_amount,
+            InventoryProduct.stock_quantity
+        ).join(IntegratedProduct, InventoryProduct.product_id == IntegratedProduct.product_id
+        ).join(IndependentProductMaster, IntegratedProduct.independent_product_id == IndependentProductMaster.independent_product_id
+        ).filter(InventoryProduct.organization_id == organization_id).all()
+
+        #結合
+        all_products = meitex_products + independent_products
+
+        if not all_products:
             print("miss")
             raise HTTPException(status_code=404, detail="No products found for this organization")
 
         # Pydantic モデルに変換して返す
-        return [ProductResponse.from_orm(product) for product in products]
+        return [ProductResponse.from_orm(product) for product in all_products]
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
