@@ -304,7 +304,7 @@ def add_message(message: MessageCreate, db: Session = Depends(get_db)):
             sender_user_id = message.user_id,
             receiver_user_id = message.receiver_user_id,
             product_id = message.product_id,
-            send_date = datetime.utcnow()  # UTCに統一
+            send_date = datetime.now(datetime.timezone.utc)  # UTCに統一
         )
         db.add(new_message)
         db.commit()
