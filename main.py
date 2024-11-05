@@ -12,7 +12,7 @@ from typing import Optional
 from pydantic import BaseModel  # Pydanticモデルをインポート
 from create_db import Product, IncomingInfo, IncomingProduct
 
-from sqlalchemy import create_engine, Column, Integer, String, select, DECIMAL, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, select, DECIMAL, ForeignKey, Boolean
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
@@ -194,6 +194,13 @@ class Message(Base):
     receiver_user_id = Column(Integer, ForeignKey('userinformation.user_id'), nullable=False)  # ユーザーテーブルがある場合
     product_id = Column(Integer, ForeignKey('MeitexProductMaster.meitex_product_id'), nullable=False)
     send_date = datetime.now(timezone.utc)  # UTCに統一
+
+class UserInformation(Base):
+    __tablename__ = 'userinformation'  
+    user_id = Column(Integer, primary_key=True)
+    user_name = Column(String(255))
+    ambassador_flag = Column(Boolean)
+    organization_id = Column(Integer, ForeignKey("organization.organization_id"))
 
 class IncomingRegisterRequest(BaseModel):
     price: float
