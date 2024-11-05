@@ -12,7 +12,7 @@ from typing import Optional
 from pydantic import BaseModel  # Pydanticモデルをインポート
 from create_db import Product, IncomingInfo, IncomingProduct
 
-from sqlalchemy import create_engine, Column, Integer, String, select, DECIMAL, ForeignKey, Boolean
+from sqlalchemy import create_engine, Column, Integer, String, select, DECIMAL, ForeignKey, Boolean, DateTime
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
@@ -37,6 +37,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 日本時間のタイムゾーンを取得
+japan_timezone = pytz.timezone('Asia/Tokyo')
 
 # ロガーのセットアップ
 logger = logging.getLogger("uvicorn.error")
@@ -193,7 +196,7 @@ class Message(Base):
     sender_user_id = Column(Integer, ForeignKey('userinformation.user_id'), nullable=False)  # ユーザーテーブルがある場合
     receiver_user_id = Column(Integer, ForeignKey('userinformation.user_id'), nullable=False)  # ユーザーテーブルがある場合
     product_id = Column(Integer, ForeignKey('MeitexProductMaster.meitex_product_id'), nullable=False)
-    send_date = datetime.now(timezone.utc)  # UTCに統一
+    send_date = Column(DateTime, nullable=False, default=lambda: datetime.now(japan_timezone))  # デフォルトを日本時間に設定
 
 class UserInformation(Base):
     __tablename__ = 'userinformation'  
@@ -339,7 +342,7 @@ def add_message(message_data: MessageCreate, db: Session = Depends(get_db)):
             sender_user_id=message_data.sender_user_id,    # フィールド名を合わせる
             receiver_user_id=message_data.receiver_user_id,
             product_id=message_data.product_id,
-            send_date = datetime.now(timezone.utc)  # UTCに統一
+            send_date=datetime.now(japan_timezone)  # UTCに統一
         )
         db.add(new_message)
         db.commit()
