@@ -1,6 +1,6 @@
 import os
 from pytz import timezone
-from datetime import datetime
+from datetime import datetime, timezone
 import pytz
 import logging
 from dotenv import load_dotenv
@@ -12,8 +12,8 @@ from typing import Optional
 from pydantic import BaseModel  # Pydanticモデルをインポート
 from create_db import Product, IncomingInfo, IncomingProduct
 
-from sqlalchemy import create_engine, Column, Integer, String, select, DECIMAL, ForeignKey
-
+from sqlalchemy import create_engine, Column, Integer, String, select, DECIMAL, ForeignKey, Boolean
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 
@@ -179,6 +179,29 @@ class ProductCreate(BaseModel):
     barcode: str
     name: str
 
+# メッセージモデルの定義
+class MessageCreate(BaseModel):
+    message_content: str
+    sender_user_id: int # 送信者のID
+    receiver_user_id: int  # 受信者のID
+    product_id: int  # 商品のID
+
+class Message(Base):
+    __tablename__ = 'message'
+    message_id = Column(Integer, primary_key=True, index=True)
+    message_content = Column(String(500), nullable=False)
+    sender_user_id = Column(Integer, ForeignKey('userinformation.user_id'), nullable=False)  # ユーザーテーブルがある場合
+    receiver_user_id = Column(Integer, ForeignKey('userinformation.user_id'), nullable=False)  # ユーザーテーブルがある場合
+    product_id = Column(Integer, ForeignKey('MeitexProductMaster.meitex_product_id'), nullable=False)
+    send_date = datetime.now(timezone.utc)  # UTCに統一
+
+class UserInformation(Base):
+    __tablename__ = 'userinformation'  
+    user_id = Column(Integer, primary_key=True)
+    user_name = Column(String(255))
+    ambassador_flag = Column(Boolean)
+    organization_id = Column(Integer, ForeignKey("organization.organization_id"))
+
 class IncomingRegisterRequest(BaseModel):
     price: float
     items: list
@@ -303,6 +326,36 @@ def add_product(product: ProductCreate, db: Session = Depends(get_db)):
         logger.error(f"商品追加時のエラー: {str(e)}")
         raise HTTPException(status_code=500, detail="商品を追加できませんでした")
 
+# 新しいメッセージを追加するエンドポイント
+@app.post("/add_message/")
+def add_message(message_data: MessageCreate, db: Session = Depends(get_db)):
+    print(f"Received message_data: {message_data}")
+    print(f"MessageCreate module: {MessageCreate.__module__}")
+    print(f"MessageCreate name: {MessageCreate.__name__}")
+    try:
+        # 新しいメッセージを追加
+        new_message = Message(
+            message_content=message_data.message_content,  # フィールド名を合わせる
+            sender_user_id=message_data.sender_user_id,    # フィールド名を合わせる
+            receiver_user_id=message_data.receiver_user_id,
+            product_id=message_data.product_id,
+            send_date = datetime.now(timezone.utc)  # UTCに統一
+        )
+        db.add(new_message)
+        db.commit()
+        db.refresh(new_message)
+        
+        logger.info(f"メッセージが追加されました: {new_message.message_id}")
+        return {"message": "メッセージが追加されました"}
+    
+    except IntegrityError as e:
+        logger.error(f"Integrity error when adding message: {str(e)}")
+        raise HTTPException(status_code=400, detail="メッセージの追加に失敗しました: 外部キーが無効です")
+    
+    except Exception as e:
+        logger.error(f"メッセージ追加時のエラー: {str(e)}")
+        raise HTTPException(status_code=500, detail="メッセージを追加できませんでした")
+
 @app.post("/recieving_register")
 async def register_incoming_products(request: IncomingRegisterRequest, db: Session = Depends(get_db)):
     # 送信された entryDate を UTC から JST に変換
@@ -340,5 +393,6 @@ async def register_incoming_products(request: IncomingRegisterRequest, db: Sessi
 
 # アプリケーションの起動: 環境変数 PORT が指定されていればそれを使用
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 8000))  # 環境変数 PORT があればそれを使用し、なければデフォルトで8000を使用
-    app.run(host="0.0.0.0", port=port)
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port, reload=True)

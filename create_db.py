@@ -27,7 +27,6 @@ class InventoryProduct(Base):
     product_id = Column(Integer, ForeignKey('product_master.product_id'), nullable=False)
     selling_price = Column(Float)
     stock_quantity = Column(Integer)
-
     product = relationship("Product")
 
 class IncomingInfo(Base):
