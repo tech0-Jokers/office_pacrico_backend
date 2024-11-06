@@ -329,6 +329,19 @@ def add_product(product: ProductCreate, db: Session = Depends(get_db)):
         logger.error(f"商品追加時のエラー: {str(e)}")
         raise HTTPException(status_code=500, detail="商品を追加できませんでした")
 
+#メッセージを取得するエンドポイント
+@app.get("/get_messages/")
+def get_messages(sender_user_id: int, receiver_user_id: int, product_id: int, db: Session = Depends(get_db)):
+    messages = db.query(Message).filter(
+        ((Message.sender_user_id == sender_user_id) & (Message.receiver_user_id == receiver_user_id) & (Message.product_id == product_id)) |
+        ((Message.sender_user_id == receiver_user_id) & (Message.receiver_user_id == sender_user_id) & (Message.product_id == product_id))
+    ).order_by(Message.send_date.desc()).all()
+    
+    if not messages:
+        return {"message": "No messages found between the specified users."}
+    
+    return messages
+
 # 新しいメッセージを追加するエンドポイント
 @app.post("/add_message/")
 def add_message(message_data: MessageCreate, db: Session = Depends(get_db)):
