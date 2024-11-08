@@ -5,7 +5,7 @@ import pytz
 import logging
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from typing import Optional
@@ -17,6 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 
+from azure.storage.blob import BlobServiceClient
 
 # FastAPIの作成と初期化
 app = FastAPI()
@@ -40,6 +41,9 @@ app.add_middleware(
 
 # 日本時間のタイムゾーンを取得
 japan_timezone = pytz.timezone('Asia/Tokyo')
+# 現在の日本時間を取得
+current_japan_time = datetime.now(japan_timezone)
+print(f"Current Japan time: {current_japan_time}")
 
 # ロガーのセットアップ
 logger = logging.getLogger("uvicorn.error")
@@ -344,6 +348,8 @@ def add_message(message_data: MessageCreate, db: Session = Depends(get_db)):
             product_id=message_data.product_id,
             send_date=datetime.now(japan_timezone)  # UTCに統一
         )
+        print(f"send_date: {new_message.send_date}")
+
         db.add(new_message)
         db.commit()
         db.refresh(new_message)
@@ -393,6 +399,41 @@ async def register_incoming_products(request: IncomingRegisterRequest, db: Sessi
 
     db.commit()
     return {"message": "商品が正常に登録されました"}
+
+
+# AzureStorageの接続情報
+AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+AZURE_CONTAINER_NAME = "meitex-sweets-image"
+
+# AzureBlobサービスクライアントの作成
+blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
+blob_container_client = blob_service_client.get_container_client(AZURE_CONTAINER_NAME)
+
+@app.get("/images/{image_name}")
+async def get_image(image_name: str):
+    """
+    AzureBlobから指定された画像データを取得する
+    
+    Args:
+        image_name (str): 取得したい画像ファイル名
+    
+    Returns:
+        Response: 画像データを含むレスポンス
+    """
+    try:
+        # Blobクライアントの取得
+        blob_client = blob_container_client.get_blob_client(image_name)
+        
+        # Blobデータの取得
+        blob_data = blob_client.download_blob().readall()
+        
+        # レスポンスとしてデータを返す
+        return Response(content=blob_data, media_type="image/png")
+    
+    except Exception as e:
+        # エラー処理
+        print(f"Error retrieving image: {e}")
+        return Response(status_code=404)
 
 # アプリケーションの起動: 環境変数 PORT が指定されていればそれを使用
 if __name__ == '__main__':
