@@ -30,8 +30,10 @@ app.add_middleware(
         "http://localhost:3000",  # 開発時のローカルURL
         "http://127.0.0.1:3000", # 開発時のローカルURL
         "https://office-pacrico-frontend.vercel.app",  # VercelでデプロイされたフロントエンドのURL
-        "https://office-pacrico-user-frontend.vercel.app/*", #Vercelでデプロイされたユーザー用のフロントエンドのURL
-        "https://office-paclico-user-frontend.vercel.app/*", #Vercelでデプロイされたユーザー用のフロントエンドのURL
+        "https://office-pacrico-user-frontend.vercel.app", #Vercelでデプロイされたユーザー用のフロントエンドのURL
+        "https://office-paclico-user-frontend.vercel.app", #Vercelでデプロイされたユーザー用のフロントエンドのURL
+        "https://office-paclico-user-frontend.vercel.app/shop", #Vercelでデプロイされたユーザー用のフロントエンドのURL
+        "https://office-paclico-user-frontend.vercel.app/development", #Vercelでデプロイされたユーザー用のフロントエンドのURL
         "https://tech0-gen-7-step4-studentwebapp-pos-37-bxbfgkg5a7gwa7e9.eastus-01.azurewebsites.net", #Azureでデプロイされたユーザー用のフロントエンドのURL
         "https://tech0-gen-7-step4-studentwebapp-pos-35-cubpd9h4euh3g0d8.eastus-01.azurewebsites.net" #Azureでデプロイされたユーザー用のフロントエンドのURL
     ],
