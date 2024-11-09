@@ -5,7 +5,7 @@ import pytz
 import logging
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, Depends, HTTPException, Response
+from fastapi import FastAPI, Depends, HTTPException, Response, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from typing import Optional
@@ -18,6 +18,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 
 from azure.storage.blob import BlobServiceClient
+
 
 # FastAPIの作成と初期化
 app = FastAPI()
@@ -447,6 +448,24 @@ async def get_image(image_name: str):
         # エラー処理
         print(f"Error retrieving image: {e}")
         return Response(status_code=404)
+
+# Azure Blob Storageの接続文字列
+container_name = "your-container"
+
+@app.post("/upload-image/")
+async def upload_image(file: UploadFile = File(...)):
+    blob_client = blob_service_client.get_blob_client(container=container_name, blob=file.filename)
+    
+    # ファイルをBlobにアップロード
+    with open(file.filename, "wb") as image:
+        content = await file.read()
+        image.write(content)
+    
+    with open(file.filename, "rb") as data:
+        blob_client.upload_blob(data, overwrite=True)
+    
+    os.remove(file.filename)  # ローカルに保存したファイルを削除
+    return {"message": "Image uploaded successfully", "filename": file.filename}
 
 # アプリケーションの起動: 環境変数 PORT が指定されていればそれを使用
 if __name__ == '__main__':
