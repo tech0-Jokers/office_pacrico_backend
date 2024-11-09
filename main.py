@@ -221,6 +221,16 @@ class ProductResponse(BaseModel):
         orm_mode = True  # SQLAlchemy オブジェクトをサポート
         from_attributes = True  # 必要に応じて追加
 
+class ProductResponseForAmbassador(BaseModel):
+    product_id: int
+    product_name: str
+    product_explanation: Optional[str]
+    product_image_url: Optional[str]
+
+    class Config:
+        orm_mode = True  # SQLAlchemy オブジェクトをサポート
+        from_attributes = True  # 必要に応じて追加
+
 # ルートエンドポイント: こんにちはを表示
 @app.get("/")
 def read_root():
@@ -259,6 +269,42 @@ def get_products_by_organization(organization_id: int, db: Session = Depends(get
 
         # Pydantic モデルに変換して返す
         return [ProductResponse.from_orm(product) for product in all_products]
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+#アンバサダー向けに商品情報を返すAPI
+@app.get("/api/snacks/", response_model=list[ProductResponseForAmbassador])
+def get_products_by_organization(organization_id: int, db: Session = Depends(get_db)):
+    
+    try:
+        meitex_products = db.query(
+            InventoryProduct.product_id,
+            MeitexProductMaster.product_name,
+            MeitexProductMaster.product_explanation,
+            MeitexProductMaster.product_image_url
+        ).join(IntegratedProduct, InventoryProduct.product_id == IntegratedProduct.product_id
+        ).join(MeitexProductMaster, IntegratedProduct.meitex_product_id == MeitexProductMaster.meitex_product_id
+        ).filter(InventoryProduct.organization_id == organization_id).all()
+
+        independent_products = db.query(
+            InventoryProduct.product_id,
+            IndependentProductMaster.product_name,
+            IndependentProductMaster.product_explanation,
+            IndependentProductMaster.product_image_url
+        ).join(IntegratedProduct, InventoryProduct.product_id == IntegratedProduct.product_id
+        ).join(IndependentProductMaster, IntegratedProduct.independent_product_id == IndependentProductMaster.independent_product_id
+        ).filter(InventoryProduct.organization_id == organization_id).all()
+
+        #結合
+        all_products = meitex_products + independent_products
+
+        if not all_products:
+            print("miss")
+            raise HTTPException(status_code=404, detail="No products found for this organization")
+
+        # Pydantic モデルに変換して返す
+        return [ProductResponseForAmbassador.from_orm(product) for product in all_products]
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
