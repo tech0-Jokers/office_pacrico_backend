@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel  # Pydanticモデルをインポート
 from create_db import Product, IncomingInfo, IncomingProduct
 
@@ -231,6 +231,9 @@ class ProductResponseForAmbassador(BaseModel):
         orm_mode = True  # SQLAlchemy オブジェクトをサポート
         from_attributes = True  # 必要に応じて追加
 
+class ProductResponseForAmbassadorWithList(BaseModel):
+    products: List[ProductResponseForAmbassador]
+
 # ルートエンドポイント: こんにちはを表示
 @app.get("/")
 def read_root():
@@ -274,7 +277,7 @@ def get_products_by_organization(organization_id: int, db: Session = Depends(get
         raise HTTPException(status_code=500, detail=str(e))
 
 #アンバサダー向けに商品情報を返すAPI
-@app.get("/api/snacks/", response_model=list[ProductResponseForAmbassador])
+@app.get("/api/snacks/", response_model=ProductResponseForAmbassadorWithList)
 def get_products_by_organization(organization_id: int, db: Session = Depends(get_db)):
     
     try:
@@ -304,7 +307,8 @@ def get_products_by_organization(organization_id: int, db: Session = Depends(get
             raise HTTPException(status_code=404, detail="No products found for this organization")
 
         # Pydantic モデルに変換して返す
-        return [ProductResponseForAmbassador.from_orm(product) for product in all_products]
+        product_list=[ProductResponseForAmbassador.from_orm(product) for product in all_products]
+        return {"products": product_list}
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
