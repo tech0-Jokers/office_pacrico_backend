@@ -12,7 +12,7 @@ from typing import Optional, List
 from pydantic import BaseModel  # Pydanticモデルをインポート
 from create_db import Product, IncomingInfo, IncomingProduct
 
-from sqlalchemy import create_engine, Column, Integer, String, select, DECIMAL, ForeignKey, Boolean, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, select, DECIMAL, ForeignKey, Boolean, DateTime, Date
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
@@ -140,7 +140,7 @@ class CandyDB(Base):
 class InventoryProduct(Base):
     __tablename__ = 'Inventory_products'
     product_id = Column(Integer, primary_key=True)
-    organization_id = Column(Integer, ForeignKey("Organization.organization_id"), primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organization.organization_id"), primary_key=True)
     sales_amount = Column(DECIMAL(10, 2))
     stock_quantity = Column(Integer)
 
@@ -167,6 +167,39 @@ class IndependentProductMaster(Base):
     product_explanation = Column(String(255))
     product_category_id = Column(Integer)
 
+class IncomingInformation(Base):
+    __tablename__ = "IncomingInformation"
+    incoming_id = Column(Integer, primary_key=True, autoincrement=True)
+    incoming_date = Column(Date)
+    purchase_amount = Column(DECIMAL(10, 2))
+    user_id = Column(Integer, ForeignKey("userinformation.user_id"))
+
+class Message(Base):
+    __tablename__ = 'message'
+    message_id = Column(Integer, primary_key=True, index=True)
+    message_content = Column(String(500), nullable=False)
+    sender_user_id = Column(Integer, ForeignKey('userinformation.user_id'), nullable=False)  # ユーザーテーブルがある場合
+    receiver_user_id = Column(Integer, ForeignKey('userinformation.user_id'), nullable=False)  # ユーザーテーブルがある場合
+    product_id = Column(Integer, ForeignKey('MeitexProductMaster.meitex_product_id'), nullable=False)
+    send_date = Column(DateTime, nullable=False, default=lambda: datetime.now(japan_timezone))  # デフォルトを日本時間に設定
+
+class UserInformation(Base):
+    __tablename__ = 'userinformation'  
+    user_id = Column(Integer, primary_key=True)
+    user_name = Column(String(255))
+    ambassador_flag = Column(Boolean)
+    organization_id = Column(Integer, ForeignKey("organization.organization_id"))
+
+class Incoming_Products(Base):
+    __tablename__ = "Incoming_Products"
+    product_id = Column(Integer, ForeignKey("Inventory_products.product_id"), primary_key=True)
+    incoming_id = Column(Integer, ForeignKey("IncomingInformation.incoming_id"), primary_key=True)
+    incoming_quantity = Column(Integer)
+
+class Organization(Base):
+    __tablename__ = 'organization'  
+    organization_id = Column(Integer, primary_key=True)
+    organization_name = Column(String(255))
 
 
 # お菓子のデータモデル（リクエスト/レスポンス用）
@@ -188,27 +221,6 @@ class MessageCreate(BaseModel):
     sender_user_id: int # 送信者のID
     receiver_user_id: int  # 受信者のID
     product_id: int  # 商品のID
-
-class Message(Base):
-    __tablename__ = 'message'
-    message_id = Column(Integer, primary_key=True, index=True)
-    message_content = Column(String(500), nullable=False)
-    sender_user_id = Column(Integer, ForeignKey('userinformation.user_id'), nullable=False)  # ユーザーテーブルがある場合
-    receiver_user_id = Column(Integer, ForeignKey('userinformation.user_id'), nullable=False)  # ユーザーテーブルがある場合
-    product_id = Column(Integer, ForeignKey('MeitexProductMaster.meitex_product_id'), nullable=False)
-    send_date = Column(DateTime, nullable=False, default=lambda: datetime.now(japan_timezone))  # デフォルトを日本時間に設定
-
-class UserInformation(Base):
-    __tablename__ = 'userinformation'  
-    user_id = Column(Integer, primary_key=True)
-    user_name = Column(String(255))
-    ambassador_flag = Column(Boolean)
-    organization_id = Column(Integer, ForeignKey("organization.organization_id"))
-
-class IncomingRegisterRequest(BaseModel):
-    price: float
-    items: list
-    entryDate: datetime
 
 class ProductResponse(BaseModel):
     product_id: int
@@ -233,6 +245,17 @@ class ProductResponseForAmbassador(BaseModel):
 
 class ProductResponseForAmbassadorWithList(BaseModel):
     products: List[ProductResponseForAmbassador]
+
+class Item(BaseModel):
+    product_id: int
+    quantity: int
+
+class IncomingRegisterRequest(BaseModel):
+    entryDate: datetime
+    price: float
+    userId: int
+    organizationId: int
+    items: List[Item]
 
 # ルートエンドポイント: こんにちはを表示
 @app.get("/")
@@ -422,40 +445,64 @@ def add_message(message_data: MessageCreate, db: Session = Depends(get_db)):
         logger.error(f"メッセージ追加時のエラー: {str(e)}")
         raise HTTPException(status_code=500, detail="メッセージを追加できませんでした")
 
-@app.post("/recieving_register")
-async def register_incoming_products(request: IncomingRegisterRequest, db: Session = Depends(get_db)):
-    # 送信された entryDate を UTC から JST に変換
-    utc_time = request.entryDate  # entryDate は UTC と仮定
+@app.post("/receiving_register")
+async def register_incoming_products(
+    request: IncomingRegisterRequest,
+    db: Session = Depends(get_db)
+):
+    # entryDate を UTC から JST に変換
+    utc_time = request.entryDate
     jst_timezone = pytz.timezone('Asia/Tokyo')
-    
-    # UTC を日本時間に変換
     jst_time = utc_time.astimezone(jst_timezone)
 
-    # 入庫情報を挿入
-    incoming_info = IncomingInfo(
-        incoming_date=jst_time,  # 日本時間に変換した日時を使う
+    # IncomingInformation にデータを挿入
+    incoming_info = IncomingInformation(
+        incoming_date=jst_time.date(),
         purchase_amount=request.price,
-        user_id=2  #仮
+        user_id=request.userId,  # リクエストからユーザーIDを使用
     )
     db.add(incoming_info)
     db.commit()
     db.refresh(incoming_info)
+    
+    try:
+        # 商品情報の挿入と在庫更新
+        for item in request.items:
+            # Inventory_products から商品を取得（組織IDも一致するもの）
+            inventory_product = db.query(InventoryProduct).filter(
+                InventoryProduct.product_id == item.product_id,
+                InventoryProduct.organization_id == request.organizationId
+            ).first()
 
-    # 商品情報の挿入
-    for item in request.items:
-        product = db.query(Product).filter(Product.product_name == item["name"]).first()
-        if not product:
-            raise HTTPException(status_code=400, detail=f"商品 {item['name']} が見つかりません")
-        
-        incoming_product = IncomingProduct(
-            product_id=product.product_id,
-            incoming_id=incoming_info.incoming_id,
-            incoming_quantity=item["quantity"]
-        )
-        db.add(incoming_product)
+            if not inventory_product:
+                #商品が存在しない場合、新規作成
+                inventory_product = InventoryProduct(
+                    product_id=item.product_id,
+                    organization_id=request.organizationId,
+                    sales_amount=0,  
+                    stock_quantity=item.quantity  
+                )
+                db.add(inventory_product)
 
-    db.commit()
-    return {"message": "商品が正常に登録されました"}
+            else:
+                #在庫数の更新（すでにあれば加算）
+                inventory_product.stock_quantity += item.quantity
+
+            # Incoming_Products にデータを追加
+            incoming_product = Incoming_Products(
+                product_id=item.product_id,
+                incoming_id=incoming_info.incoming_id,
+                incoming_quantity=item.quantity
+            )
+            db.add(incoming_product)
+
+        db.commit()
+        return {"message": "商品が正常に登録され、在庫が更新されました"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"エラーが発生しました: {str(e)}")
+
+
 
 # アプリケーションの起動: 環境変数 PORT が指定されていればそれを使用
 if __name__ == '__main__':
