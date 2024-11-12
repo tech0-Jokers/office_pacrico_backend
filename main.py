@@ -514,7 +514,7 @@ async def register_incoming_products(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"エラーが発生しました: {str(e)}")
 
-@app.post("/api/newsnacks/?organization_id=${organizationId}")
+@app.post("/api/newsnacks/")
 async def upload_product(
     organization_id: int = Form(...),
     name: str = Form(...),
