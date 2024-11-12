@@ -56,7 +56,7 @@ load_dotenv(dotenv_path=".env.local")
 
 
 # デバッグ用: DATABASE_URL が読み込まれているか確認
-print(f"DATABASE_URL: {os.getenv('DATABASE_URL')}")
+# print(f"DATABASE_URL: {os.getenv('DATABASE_URL')}")
 
 # データベース接続設定
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -75,7 +75,9 @@ engine = create_engine(
 )
 
 # デバッグ用: 現在のデータベース接続 URL を表示
-logger.info(f"Using database URL: {SQLALCHEMY_DATABASE_URL}")
+# logger.info(f"Using database URL: {SQLALCHEMY_DATABASE_URL}")
+# データベースURLの全体をログに出力するのではなく、安全な情報のみを出力
+logger.info("データベースに接続しました。")
 
 # セッションの設定
 # SQLAlchemyのセッションを作成するためのファクトリ関数を定義します。
@@ -269,7 +271,7 @@ class IncomingRegisterRequest(BaseModel):
 def read_root():
     return {"message": "こんにちはOffice Paclicoだよ!"}
 
-@app.get("/products/{organization_id}", response_model=list[ProductResponse])
+@app.get("/products/{organization_id}", response_model=list[ProductResponse], tags=["Product Operations"])
 def get_products_by_organization(organization_id: int, db: Session = Depends(get_db)):
     print(organization_id)
     try:
@@ -375,7 +377,7 @@ def get_chocolate(chocolate_id: int, db: Session = Depends(get_chocolates_db)):
         raise HTTPException(status_code=500, detail="サーバー内部エラー")
 
 # バーコードから商品名を取得するエンドポイント
-@app.get("/get_product_name")
+@app.get("/get_product_name", tags=["Product Operations"])
 def get_product_name(barcode: str, db: Session = Depends(get_db)):
     try:
         # バーコードに基づいて商品を検索
@@ -389,7 +391,7 @@ def get_product_name(barcode: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="サーバー内部エラー")
 
 # 新しい商品を商品マスタに追加するエンドポイント（名前とバーコードのみ）
-@app.post("/add_product/")
+@app.post("/add_product/", tags=["Product Operations"])
 def add_product(product: ProductCreate, db: Session = Depends(get_db)):
     print(product.barcode)
     print(product.name)
@@ -409,51 +411,7 @@ def add_product(product: ProductCreate, db: Session = Depends(get_db)):
         logger.error(f"商品追加時のエラー: {str(e)}")
         raise HTTPException(status_code=500, detail="商品を追加できませんでした")
 
-#メッセージを取得するエンドポイント
-@app.get("/get_messages/")
-def get_messages(sender_user_id: int, receiver_user_id: int, product_id: int, db: Session = Depends(get_db)):
-    messages = db.query(Message).filter(
-        ((Message.sender_user_id == sender_user_id) & (Message.receiver_user_id == receiver_user_id) & (Message.product_id == product_id)) |
-        ((Message.sender_user_id == receiver_user_id) & (Message.receiver_user_id == sender_user_id) & (Message.product_id == product_id))
-    ).order_by(Message.send_date.desc()).all()
-    
-    if not messages:
-        return {"message": "No messages found between the specified users."}
-    
-    return messages
-
-# 新しいメッセージを追加するエンドポイント
-@app.post("/add_message/")
-def add_message(message_data: MessageCreate, db: Session = Depends(get_db)):
-    print(f"Received message_data: {message_data}")
-    print(f"MessageCreate module: {MessageCreate.__module__}")
-    print(f"MessageCreate name: {MessageCreate.__name__}")
-    try:
-        # 新しいメッセージを追加
-        new_message = Message(
-            message_content=message_data.message_content,  # フィールド名を合わせる
-            sender_user_id=message_data.sender_user_id,    # フィールド名を合わせる
-            receiver_user_id=message_data.receiver_user_id,
-            product_id=message_data.product_id,
-            send_date=datetime.now(japan_timezone)  # UTCに統一
-        )
-        print(f"send_date: {new_message.send_date}")
-
-        db.add(new_message)
-        db.commit()
-        db.refresh(new_message)
-        
-        logger.info(f"メッセージが追加されました: {new_message.message_id}")
-        return {"message": "メッセージが追加されました"}
-    
-    except IntegrityError as e:
-        logger.error(f"Integrity error when adding message: {str(e)}")
-        raise HTTPException(status_code=400, detail="メッセージの追加に失敗しました: 外部キーが無効です")
-    
-    except Exception as e:
-        logger.error(f"メッセージ追加時のエラー: {str(e)}")
-        raise HTTPException(status_code=500, detail="メッセージを追加できませんでした")
-
+# 新しい商品を商品マスタに追加するエンドポイント（名前とバーコードのみ）
 @app.post("/receiving_register")
 async def register_incoming_products(
     request: IncomingRegisterRequest,
@@ -512,6 +470,50 @@ async def register_incoming_products(
         raise HTTPException(status_code=500, detail=f"エラーが発生しました: {str(e)}")
 
 
+#メッセージを取得するエンドポイント
+@app.get("/get_messages/", tags=["Message Operations"])
+def get_messages(sender_user_id: int, receiver_user_id: int, product_id: int, db: Session = Depends(get_db)):
+    messages = db.query(Message).filter(
+        ((Message.sender_user_id == sender_user_id) & (Message.receiver_user_id == receiver_user_id) & (Message.product_id == product_id)) |
+        ((Message.sender_user_id == receiver_user_id) & (Message.receiver_user_id == sender_user_id) & (Message.product_id == product_id))
+    ).order_by(Message.send_date.desc()).all()
+    
+    if not messages:
+        return {"message": "No messages found between the specified users."}
+    
+    return messages
+
+# 新しいメッセージを追加するエンドポイント
+@app.post("/add_message/", tags=["Message Operations"])
+def add_message(message_data: MessageCreate, db: Session = Depends(get_db)):
+    print(f"Received message_data: {message_data}")
+    print(f"MessageCreate module: {MessageCreate.__module__}")
+    print(f"MessageCreate name: {MessageCreate.__name__}")
+    try:
+        # 新しいメッセージを追加
+        new_message = Message(
+            message_content=message_data.message_content,  # フィールド名を合わせる
+            sender_user_id=message_data.sender_user_id,    # フィールド名を合わせる
+            receiver_user_id=message_data.receiver_user_id,
+            product_id=message_data.product_id,
+            send_date=datetime.now(japan_timezone)  # UTCに統一
+        )
+        print(f"send_date: {new_message.send_date}")
+
+        db.add(new_message)
+        db.commit()
+        db.refresh(new_message)
+        
+        logger.info(f"メッセージが追加されました: {new_message.message_id}")
+        return {"message": "メッセージが追加されました"}
+    
+    except IntegrityError as e:
+        logger.error(f"Integrity error when adding message: {str(e)}")
+        raise HTTPException(status_code=400, detail="メッセージの追加に失敗しました: 外部キーが無効です")
+    
+    except Exception as e:
+        logger.error(f"メッセージ追加時のエラー: {str(e)}")
+        raise HTTPException(status_code=500, detail="メッセージを追加できませんでした")
 
 
 # AzureStorageの接続情報
@@ -522,7 +524,8 @@ AZURE_CONTAINER_NAME = "meitex-sweets-image"
 blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
 blob_container_client = blob_service_client.get_container_client(AZURE_CONTAINER_NAME)
 
-@app.get("/images/{image_name}")
+# 画像データを取得するエンドポイント
+@app.get("/images/{image_name}", tags=["Image Operations"])
 async def get_image(image_name: str):
     """
     AzureBlobから指定された画像データを取得する
@@ -538,7 +541,7 @@ async def get_image(image_name: str):
         blob_client = blob_container_client.get_blob_client(image_name)
         
         # Blobデータの取得
-        blob_data = blob_client.download_blob().readall()
+        blob_data = blob_client.download_blob().readall()  # 修正: readall() -> readall() を readall() に変更
         
         # レスポンスとしてデータを返す
         return Response(content=blob_data, media_type="image/png")
@@ -551,20 +554,34 @@ async def get_image(image_name: str):
 # Azure Blob Storageの接続文字列
 container_name = "your-container"
 
-@app.post("/upload-image/")
+class UploadImageResponse(BaseModel):
+    message: str
+    filename: str
+
+
+@app.post("/upload_image", response_model=UploadImageResponse, tags=["Image Operations"])
 async def upload_image(file: UploadFile = File(...)):
-    blob_client = blob_service_client.get_blob_client(container=container_name, blob=file.filename)
+    blob_client = blob_service_client.get_blob_client(container=AZURE_CONTAINER_NAME, blob=file.filename)
     
     # ファイルをBlobにアップロード
+    content = await file.read()
     with open(file.filename, "wb") as image:
-        content = await file.read()
         image.write(content)
     
     with open(file.filename, "rb") as data:
         blob_client.upload_blob(data, overwrite=True)
     
+    # BlobにアップロードしたファイルのURLを取得
+    blob_url = blob_client.url
+
     os.remove(file.filename)  # ローカルに保存したファイルを削除
-    return {"message": "Image uploaded successfully", "filename": file.filename}
+    return {"message": "Image uploaded successfully", "filename": file.filename, "url": blob_url}
+
+# main.pyに追加
+@app.get("/test")
+def test_endpoint():
+    return {"message": "Test endpoint"}
+
 
 # アプリケーションの起動: 環境変数 PORT が指定されていればそれを使用
 if __name__ == '__main__':
