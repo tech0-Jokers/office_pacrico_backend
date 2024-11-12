@@ -28,7 +28,7 @@ AZURE_CONTAINER_NAME = "meitex-sweets-image"
 
 # AzureBlobサービスクライアントの作成
 blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
-
+blob_container_client = blob_service_client.get_container_client(AZURE_CONTAINER_NAME)
 
 # FastAPIの作成と初期化
 app = FastAPI()
@@ -575,15 +575,6 @@ def add_message(message_data: MessageCreate, db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"メッセージ追加時のエラー: {str(e)}")
         raise HTTPException(status_code=500, detail="メッセージを追加できませんでした")
-
-
-# AzureStorageの接続情報
-AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
-AZURE_CONTAINER_NAME = "meitex-sweets-image"
-
-# AzureBlobサービスクライアントの作成
-blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
-blob_container_client = blob_service_client.get_container_client(AZURE_CONTAINER_NAME)
 
 # 画像データを取得するエンドポイント
 @app.get("/images/{image_name}", tags=["Image Operations"])
