@@ -5,7 +5,7 @@ import pytz
 import logging
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, Depends, HTTPException, Response, File, UploadFile
+from fastapi import FastAPI, Depends, HTTPException, Response, File, UploadFile, Form, Response, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from typing import Optional, List
@@ -18,6 +18,16 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 
 from azure.storage.blob import BlobServiceClient
+import uuid
+
+from azure.storage.blob import BlobServiceClient
+
+# AzureStorageの接続情報
+AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+AZURE_CONTAINER_NAME = "meitex-sweets-image"
+
+# AzureBlobサービスクライアントの作成
+blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
 
 
 # FastAPIの作成と初期化
@@ -32,6 +42,8 @@ app.add_middleware(
         "https://office-pacrico-frontend.vercel.app",  # VercelでデプロイされたフロントエンドのURL
         "https://office-pacrico-user-frontend.vercel.app", #Vercelでデプロイされたユーザー用のフロントエンドのURL
         "https://office-paclico-user-frontend.vercel.app", #Vercelでデプロイされたユーザー用のフロントエンドのURL
+        "https://office-paclico-user-frontend.vercel.app/shop", #Vercelでデプロイされたユーザー用のフロントエンドのURL
+        "https://office-paclico-user-frontend.vercel.app/development", #Vercelでデプロイされたユーザー用のフロントエンドのURL
         "https://office-paclico-user-frontend.vercel.app/shop", #Vercelでデプロイされたユーザー用のフロントエンドのURL
         "https://office-paclico-user-frontend.vercel.app/development", #Vercelでデプロイされたユーザー用のフロントエンドのURL
         "https://tech0-gen-7-step4-studentwebapp-pos-37-bxbfgkg5a7gwa7e9.eastus-01.azurewebsites.net", #Azureでデプロイされたユーザー用のフロントエンドのURL
@@ -155,7 +167,7 @@ class InventoryProduct(Base):
 
 class IntegratedProduct(Base):
     __tablename__ = 'integrated_products'
-    product_id = Column(Integer, primary_key=True)
+    product_id = Column(Integer, primary_key=True, autoincrement=True)
     meitex_product_id = Column(Integer, ForeignKey("MeitexProductMaster.meitex_product_id"))
     independent_product_id = Column(Integer, ForeignKey("IndependentProductMaster.independent_product_id"))
 
@@ -169,12 +181,12 @@ class MeitexProductMaster(Base):
 
 class IndependentProductMaster(Base):
     __tablename__ = 'IndependentProductMaster'
-    independent_product_id = Column(Integer, primary_key=True)
-    organization_id = Column(Integer, ForeignKey("Organization.organization_id"))
+    independent_product_id = Column(Integer, primary_key=True, autoincrement=True)
+    organization_id = Column(Integer, ForeignKey("organization.organization_id"))
     product_name = Column(String(255))
     product_image_url = Column(String(255))
     product_explanation = Column(String(255))
-    product_category_id = Column(Integer)
+    product_category_id = Column(Integer, nullable=True)
 
 class IncomingInformation(Base):
     __tablename__ = "IncomingInformation"
@@ -431,7 +443,7 @@ async def register_incoming_products(
     db.add(incoming_info)
     db.commit()
     db.refresh(incoming_info)
-    
+
     try:
         # 商品情報の挿入と在庫更新
         for item in request.items:
@@ -469,7 +481,56 @@ async def register_incoming_products(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"エラーが発生しました: {str(e)}")
 
+@app.post("/api/newsnacks/")
+async def upload_product(
+    organization_id: int = Form(...),
+    name: str = Form(...),
+    description: str = Form(...),
+    image: UploadFile = File(...)
+):
+    # 画像のユニークなBlob名を生成
+    blob_name = f"{uuid.uuid4()}_{image.filename}"
+    blob_client = blob_service_client.get_blob_client(container=AZURE_CONTAINER_NAME, blob=blob_name)
 
+    # 画像をAzure Blob Storageにアップロード
+    try:
+        blob_client.upload_blob(image.file, overwrite=True)
+        image_url = f"https://{blob_service_client.account_name}.blob.core.windows.net/{AZURE_CONTAINER_NAME}/{blob_name}"
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"画像のアップロードに失敗しました: {str(e)}")
+
+    # データベース操作
+    db = SessionLocal()
+    try:
+        # IndependentProductMaster に新しいレコードを追加
+        new_product = IndependentProductMaster(
+            organization_id=organization_id,
+            product_name=name,
+            product_image_url=image_url,
+            product_explanation=description,
+        )
+        db.add(new_product)
+        db.commit()
+        db.refresh(new_product)
+
+        # IntegratedProduct に新しいレコードを追加
+        new_integrated_product = IntegratedProduct(
+            independent_product_id=new_product.independent_product_id
+        )
+        db.add(new_integrated_product)
+        db.commit()
+        db.refresh(new_integrated_product)
+
+        return {
+            "message": "独自商品と統合製品が正常にアップロードされました",
+            "product_id": new_product.independent_product_id,
+            "integrated_product_id": new_integrated_product.product_id
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"データベースへの製品情報の挿入に失敗しました: {str(e)}")
+    finally:
+        db.close()
 #メッセージを取得するエンドポイント
 @app.get("/get_messages/", tags=["Message Operations"])
 def get_messages(sender_user_id: int, receiver_user_id: int, product_id: int, db: Session = Depends(get_db)):
