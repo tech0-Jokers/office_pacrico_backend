@@ -22,8 +22,14 @@ import uuid
 
 from azure.storage.blob import BlobServiceClient
 
+# .env.local ファイルを明示的に指定して環境変数を読み込む
+load_dotenv(dotenv_path=".env.local")
+
 # AzureStorageの接続情報
 AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+if AZURE_STORAGE_CONNECTION_STRING is None:
+    raise ValueError("AZURE_STORAGE_CONNECTION_STRING is not set in the environment variables")
+
 AZURE_CONTAINER_NAME = "meitex-sweets-image"
 
 # AzureBlobサービスクライアントの作成
@@ -62,10 +68,6 @@ print(f"Current Japan time: {current_japan_time}")
 
 # ロガーのセットアップ
 logger = logging.getLogger("uvicorn.error")
-
-# .env.local ファイルを明示的に指定して環境変数を読み込む
-load_dotenv(dotenv_path=".env.local")
-
 
 # デバッグ用: DATABASE_URL が読み込まれているか確認
 # print(f"DATABASE_URL: {os.getenv('DATABASE_URL')}")
