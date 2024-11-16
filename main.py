@@ -271,13 +271,13 @@ class ProductResponseForAmbassadorWithList(BaseModel):
 
 class Item(BaseModel):
     product_id: int
-    quantity: int
+    incoming_quantity: int
 
 class IncomingRegisterRequest(BaseModel):
     entryDate: datetime
-    price: float
-    userId: int
-    organizationId: int
+    purchase_amount: float
+    user_id: int
+    organization_id: int
     items: List[Item]
 
 # ルートエンドポイント: こんにちはを表示
@@ -439,8 +439,8 @@ async def register_incoming_products(
     # IncomingInformation にデータを挿入
     incoming_info = IncomingInformation(
         incoming_date=jst_time.date(),
-        purchase_amount=request.price,
-        user_id=request.userId,  # リクエストからユーザーIDを使用
+        purchase_amount=request.purchase_amount,
+        user_id=request.user_id,  # リクエストからユーザーIDを使用
     )
     db.add(incoming_info)
     db.commit()
@@ -452,28 +452,28 @@ async def register_incoming_products(
             # Inventory_products から商品を取得（組織IDも一致するもの）
             inventory_product = db.query(InventoryProduct).filter(
                 InventoryProduct.product_id == item.product_id,
-                InventoryProduct.organization_id == request.organizationId
+                InventoryProduct.organization_id == request.organization_id
             ).first()
 
             if not inventory_product:
                 #商品が存在しない場合、新規作成
                 inventory_product = InventoryProduct(
                     product_id=item.product_id,
-                    organization_id=request.organizationId,
+                    organization_id=request.organization_id,
                     sales_amount=0,  
-                    stock_quantity=item.quantity  
+                    stock_quantity=item.incoming_quantity  
                 )
                 db.add(inventory_product)
 
             else:
                 #在庫数の更新（すでにあれば加算）
-                inventory_product.stock_quantity += item.quantity
+                inventory_product.stock_quantity += item.incoming_quantity
 
             # Incoming_Products にデータを追加
             incoming_product = Incoming_Products(
                 product_id=item.product_id,
                 incoming_id=incoming_info.incoming_id,
-                incoming_quantity=item.quantity
+                incoming_quantity=item.incoming_quantity
             )
             db.add(incoming_product)
 
@@ -526,7 +526,8 @@ async def upload_product(
         return {
             "message": "独自商品と統合製品が正常にアップロードされました",
             "product_id": new_product.independent_product_id,
-            "integrated_product_id": new_integrated_product.product_id
+            "integrated_product_id": new_integrated_product.product_id,
+            "product_name": new_product.product_name
         }
     except Exception as e:
         db.rollback()
