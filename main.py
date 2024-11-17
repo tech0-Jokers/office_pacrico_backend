@@ -525,8 +525,8 @@ async def upload_product(
 
         return {
             "message": "独自商品と統合製品が正常にアップロードされました",
-            "product_id": new_product.independent_product_id,
-            "integrated_product_id": new_integrated_product.product_id,
+            "independent_product_id": new_product.independent_product_id,
+            "product_id": new_integrated_product.product_id,
             "product_name": new_product.product_name
         }
     except Exception as e:
