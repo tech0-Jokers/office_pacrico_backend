@@ -534,6 +534,33 @@ async def upload_product(
         raise HTTPException(status_code=500, detail=f"データベースへの製品情報の挿入に失敗しました: {str(e)}")
     finally:
         db.close()
+
+#指定された組織IDに紐づくメッセージ情報をすべて取得するエンドポイント
+@app.get("/messages/")
+def get_messages(organization_id: int, db: Session = Depends(get_db)):
+    messages = (
+        db.query(Message)
+        .join(UserInformation, (Message.sender_user_id == UserInformation.user_id) | (Message.receiver_user_id == UserInformation.user_id))
+        .filter(UserInformation.organization_id == organization_id)
+        .all()
+    )
+    if not messages:
+        raise HTTPException(status_code=404, detail="No messages found for this organization")
+    return {
+        "messages": [
+            {
+                "message_id": message.message_id,
+                "sender_user_id": message.sender_user_id,
+                "receiver_user_id": message.receiver_user_id,
+                "message_content": message.message_content,
+                "product_id": message.product_id,
+                "send_date": message.send_date.isoformat() if message.send_date else None,
+            }
+            for message in messages
+        ]
+    }
+
+
 #メッセージを取得するエンドポイント
 @app.get("/get_messages/", tags=["Message Operations"])
 def get_messages(sender_user_id: int, receiver_user_id: int, product_id: int, db: Session = Depends(get_db)):
