@@ -357,44 +357,47 @@ def get_products_by_organization(organization_id: int, db: Session = Depends(get
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-"""
-#アンバサダー向けに商品情報を返すAPI
-@app.get("/api/snacks/", response_model=ProductResponseForAmbassadorWithList)
-def get_products_by_organization(organization_id: int, db: Session = Depends(get_db)):
-    
+#組織IDに応じて在庫情報を返すAPI
+@app.get("/inventory_products/{organization_id}")
+def get_inventory_products(organization_id: int, db: Session = Depends(get_db)):
     try:
-        meitex_products = db.query(
-            InventoryProduct.product_id,
-            MeitexProductMaster.product_name,
-            MeitexProductMaster.product_explanation,
-            MeitexProductMaster.product_image_url
-        ).join(IntegratedProduct, InventoryProduct.product_id == IntegratedProduct.product_id
-        ).join(MeitexProductMaster, IntegratedProduct.meitex_product_id == MeitexProductMaster.meitex_product_id
-        ).filter(InventoryProduct.organization_id == organization_id).all()
+        # データベースクエリ
+        results = (
+            db.query(
+                InventoryProduct.product_id,
+                InventoryProduct.sales_amount,
+                InventoryProduct.stock_quantity,
+                IndependentProductMaster.product_name.label("independent_product_name"),
+                IndependentProductMaster.product_explanation.label("independent_product_explanation"),
+                IndependentProductMaster.product_image_url.label("independent_product_image_url"),
+                MeitexProductMaster.product_name.label("meitex_product_name"),
+                MeitexProductMaster.product_explanation.label("meitex_product_explanation"),
+                MeitexProductMaster.product_image_url.label("meitex_product_image_url")
+            )
+            .join(IntegratedProduct, InventoryProduct.product_id == IntegratedProduct.product_id)
+            .outerjoin(IndependentProductMaster, IntegratedProduct.independent_product_id == IndependentProductMaster.independent_product_id)
+            .outerjoin(MeitexProductMaster, IntegratedProduct.meitex_product_id == MeitexProductMaster.meitex_product_id)
+            .filter(InventoryProduct.organization_id == organization_id)
+            .all()
+        )
 
-        independent_products = db.query(
-            InventoryProduct.product_id,
-            IndependentProductMaster.product_name,
-            IndependentProductMaster.product_explanation,
-            IndependentProductMaster.product_image_url
-        ).join(IntegratedProduct, InventoryProduct.product_id == IntegratedProduct.product_id
-        ).join(IndependentProductMaster, IntegratedProduct.independent_product_id == IndependentProductMaster.independent_product_id
-        ).filter(InventoryProduct.organization_id == organization_id).all()
+        # レスポンスデータ作成
+        response = [
+            {
+                "product_id": result.product_id,
+                "sales_amount": int(result.sales_amount),
+                "stock_quantity": result.stock_quantity,
+                "product_name": result.independent_product_name or result.meitex_product_name,
+                "product_explanation": result.independent_product_explanation or result.meitex_product_explanation,
+                "product_image_url": result.independent_product_image_url or result.meitex_product_image_url
+            }
+            for result in results
+        ]
 
-        #結合
-        all_products = meitex_products + independent_products
-
-        if not all_products:
-            print("miss")
-            raise HTTPException(status_code=404, detail="No products found for this organization")
-
-        # Pydantic モデルに変換して返す
-        product_list=[ProductResponseForAmbassador.from_orm(product) for product in all_products]
-        return {"products": product_list}
-    
+        return response
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-"""
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+
         
 # お菓子データを取得するエンドポイント（Candy用）
 @app.get("/candies", response_model=list[Candy])
@@ -520,6 +523,7 @@ async def register_incoming_products(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"エラーが発生しました: {str(e)}")
 
+#独自商品を新規で登録
 @app.post("/api/newsnacks/")
 async def upload_product(
     organization_id: int = Form(...),
