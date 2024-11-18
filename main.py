@@ -322,6 +322,42 @@ def get_products_by_organization(organization_id: int, db: Session = Depends(get
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+#アンバサダー向けに商品情報を返すAPI（meitex商品+独自商品）
+@app.get("/api/snacks/", response_model=ProductResponseForAmbassadorWithList)
+def get_products_by_organization(organization_id: int, db: Session = Depends(get_db)):
+    
+    try:
+        meitex_products = db.query(
+            IntegratedProduct.product_id,
+            MeitexProductMaster.product_name,
+            MeitexProductMaster.product_explanation,
+            MeitexProductMaster.product_image_url
+        ).join(MeitexProductMaster, IntegratedProduct.meitex_product_id == MeitexProductMaster.meitex_product_id
+        ).all()
+
+        independent_products = db.query(
+            IntegratedProduct.product_id,
+            IndependentProductMaster.product_name,
+            IndependentProductMaster.product_explanation,
+            IndependentProductMaster.product_image_url
+        ).join(IndependentProductMaster, IntegratedProduct.independent_product_id == IndependentProductMaster.independent_product_id
+        ).filter(IndependentProductMaster.organization_id == organization_id).all()
+
+        #結合
+        all_products = meitex_products + independent_products
+
+        if not all_products:
+            print("miss")
+            raise HTTPException(status_code=404, detail="No products found for this organization")
+
+        # Pydantic モデルに変換して返す
+        product_list=[ProductResponseForAmbassador.from_orm(product) for product in all_products]
+        return {"products": product_list}
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+"""
 #アンバサダー向けに商品情報を返すAPI
 @app.get("/api/snacks/", response_model=ProductResponseForAmbassadorWithList)
 def get_products_by_organization(organization_id: int, db: Session = Depends(get_db)):
@@ -358,7 +394,8 @@ def get_products_by_organization(organization_id: int, db: Session = Depends(get
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
+"""
+        
 # お菓子データを取得するエンドポイント（Candy用）
 @app.get("/candies", response_model=list[Candy])
 def get_candies(db: Session = Depends(get_db)):
