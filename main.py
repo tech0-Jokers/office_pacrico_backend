@@ -17,10 +17,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 
-from azure.storage.blob import BlobServiceClient
+from azure.storage.blob import BlobServiceClient,ContentSettings
 import uuid
-
-from azure.storage.blob import BlobServiceClient
 
 # .env.local ファイルを明示的に指定して環境変数を読み込む
 load_dotenv(dotenv_path=".env.local")
@@ -523,7 +521,7 @@ async def register_incoming_products(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"エラーが発生しました: {str(e)}")
 
-#独自商品を新規で登録
+# 独自商品を新規で登録するエンドポイント
 @app.post("/api/newsnacks/")
 async def upload_product(
     organization_id: int = Form(...),
@@ -537,13 +535,19 @@ async def upload_product(
 
     # 画像をAzure Blob Storageにアップロード
     try:
-        blob_client.upload_blob(image.file, overwrite=True)
+        # Content-Typeを設定
+        content_settings = ContentSettings(content_type=image.content_type)
+
+        # Blob Storageにアップロード
+        blob_client.upload_blob(image.file, overwrite=True, content_settings=content_settings)
+
+        # アップロードされた画像のURLを生成
         image_url = f"https://{blob_service_client.account_name}.blob.core.windows.net/{AZURE_CONTAINER_NAME}/{blob_name}"
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"画像のアップロードに失敗しました: {str(e)}")
 
     # データベース操作
-    db = SessionLocal()
+    db: Session = SessionLocal()
     try:
         # IndependentProductMaster に新しいレコードを追加
         new_product = IndependentProductMaster(
