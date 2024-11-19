@@ -5,14 +5,14 @@ import pytz
 import logging
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, Depends, HTTPException, Response, File, UploadFile, Form, Response, File, UploadFile
+from fastapi import FastAPI, Depends, HTTPException, Response, File, UploadFile, Form, Response, File, UploadFile, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from typing import Optional, List
 from pydantic import BaseModel  # Pydanticモデルをインポート
 from create_db import Product, IncomingInfo, IncomingProduct
 
-from sqlalchemy import create_engine, Column, Integer, String, select, DECIMAL, ForeignKey, Boolean, DateTime, Date
+from sqlalchemy import create_engine, Column, Integer, String, select, DECIMAL, ForeignKey, Boolean, DateTime, Date, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
@@ -536,11 +536,14 @@ async def upload_product(
         db.close()
 
 #指定された組織IDに紐づくメッセージ情報をすべて取得するエンドポイント
-@app.get("/messages/")
+@app.get("/messages/", tags=["Message Operations"])
 def get_messages(organization_id: int, db: Session = Depends(get_db)):
     messages = (
         db.query(Message)
-        .join(UserInformation, (Message.sender_user_id == UserInformation.user_id) | (Message.receiver_user_id == UserInformation.user_id))
+        .join(UserInformation,
+            (Message.sender_user_id == UserInformation.user_id) |
+            (Message.receiver_user_id == UserInformation.user_id)
+        )
         .filter(UserInformation.organization_id == organization_id)
         .all()
     )
@@ -560,6 +563,30 @@ def get_messages(organization_id: int, db: Session = Depends(get_db)):
         ]
     }
 
+#指定された組織IDに紐づくメッセージの回数を取得するエンドポイント
+@app.get("/messages/count/", tags=["DashBoard"])
+def get_messages_count(organization_id: int, db: Session = Depends(get_db)):
+    try:
+        messages_count = (
+            db.query(func.count(Message.message_id))
+            .join(UserInformation,
+                (Message.sender_user_id == UserInformation.user_id) | 
+                (Message.receiver_user_id == UserInformation.user_id)
+            )
+            .filter(UserInformation.organization_id == organization_id)
+            .scalar()
+        )
+        
+        return {
+            "organization_id": organization_id,
+            "total_messages": messages_count
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"メッセージ数の取得中にエラーが発生しました: {str(e)}"
+        )
 
 #メッセージを取得するエンドポイント
 @app.get("/get_messages/", tags=["Message Operations"])
