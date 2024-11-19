@@ -17,10 +17,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 
-from azure.storage.blob import BlobServiceClient
+from azure.storage.blob import BlobServiceClient,ContentSettings
 import uuid
-
-from azure.storage.blob import BlobServiceClient
 
 # .env.local ファイルを明示的に指定して環境変数を読み込む
 load_dotenv(dotenv_path=".env.local")
@@ -322,28 +320,26 @@ def get_products_by_organization(organization_id: int, db: Session = Depends(get
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-#アンバサダー向けに商品情報を返すAPI
+#アンバサダー向けに商品情報を返すAPI（meitex商品+独自商品）
 @app.get("/api/snacks/", response_model=ProductResponseForAmbassadorWithList)
 def get_products_by_organization(organization_id: int, db: Session = Depends(get_db)):
     
     try:
         meitex_products = db.query(
-            InventoryProduct.product_id,
+            IntegratedProduct.product_id,
             MeitexProductMaster.product_name,
             MeitexProductMaster.product_explanation,
             MeitexProductMaster.product_image_url
-        ).join(IntegratedProduct, InventoryProduct.product_id == IntegratedProduct.product_id
         ).join(MeitexProductMaster, IntegratedProduct.meitex_product_id == MeitexProductMaster.meitex_product_id
-        ).filter(InventoryProduct.organization_id == organization_id).all()
+        ).all()
 
         independent_products = db.query(
-            InventoryProduct.product_id,
+            IntegratedProduct.product_id,
             IndependentProductMaster.product_name,
             IndependentProductMaster.product_explanation,
             IndependentProductMaster.product_image_url
-        ).join(IntegratedProduct, InventoryProduct.product_id == IntegratedProduct.product_id
         ).join(IndependentProductMaster, IntegratedProduct.independent_product_id == IndependentProductMaster.independent_product_id
-        ).filter(InventoryProduct.organization_id == organization_id).all()
+        ).filter(IndependentProductMaster.organization_id == organization_id).all()
 
         #結合
         all_products = meitex_products + independent_products
@@ -359,6 +355,48 @@ def get_products_by_organization(organization_id: int, db: Session = Depends(get
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+#組織IDに応じて在庫情報を返すAPI
+@app.get("/inventory_products/{organization_id}")
+def get_inventory_products(organization_id: int, db: Session = Depends(get_db)):
+    try:
+        # データベースクエリ
+        results = (
+            db.query(
+                InventoryProduct.product_id,
+                InventoryProduct.sales_amount,
+                InventoryProduct.stock_quantity,
+                IndependentProductMaster.product_name.label("independent_product_name"),
+                IndependentProductMaster.product_explanation.label("independent_product_explanation"),
+                IndependentProductMaster.product_image_url.label("independent_product_image_url"),
+                MeitexProductMaster.product_name.label("meitex_product_name"),
+                MeitexProductMaster.product_explanation.label("meitex_product_explanation"),
+                MeitexProductMaster.product_image_url.label("meitex_product_image_url")
+            )
+            .join(IntegratedProduct, InventoryProduct.product_id == IntegratedProduct.product_id)
+            .outerjoin(IndependentProductMaster, IntegratedProduct.independent_product_id == IndependentProductMaster.independent_product_id)
+            .outerjoin(MeitexProductMaster, IntegratedProduct.meitex_product_id == MeitexProductMaster.meitex_product_id)
+            .filter(InventoryProduct.organization_id == organization_id)
+            .all()
+        )
+
+        # レスポンスデータ作成
+        response = [
+            {
+                "product_id": result.product_id,
+                "sales_amount": int(result.sales_amount),
+                "stock_quantity": result.stock_quantity,
+                "product_name": result.independent_product_name or result.meitex_product_name,
+                "product_explanation": result.independent_product_explanation or result.meitex_product_explanation,
+                "product_image_url": result.independent_product_image_url or result.meitex_product_image_url
+            }
+            for result in results
+        ]
+
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+
+        
 # お菓子データを取得するエンドポイント（Candy用）
 @app.get("/candies", response_model=list[Candy])
 def get_candies(db: Session = Depends(get_db)):
@@ -483,6 +521,7 @@ async def register_incoming_products(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"エラーが発生しました: {str(e)}")
 
+# 独自商品を新規で登録するエンドポイント
 @app.post("/api/newsnacks/")
 async def upload_product(
     organization_id: int = Form(...),
@@ -496,13 +535,19 @@ async def upload_product(
 
     # 画像をAzure Blob Storageにアップロード
     try:
-        blob_client.upload_blob(image.file, overwrite=True)
+        # Content-Typeを設定
+        content_settings = ContentSettings(content_type=image.content_type)
+
+        # Blob Storageにアップロード
+        blob_client.upload_blob(image.file, overwrite=True, content_settings=content_settings)
+
+        # アップロードされた画像のURLを生成
         image_url = f"https://{blob_service_client.account_name}.blob.core.windows.net/{AZURE_CONTAINER_NAME}/{blob_name}"
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"画像のアップロードに失敗しました: {str(e)}")
 
     # データベース操作
-    db = SessionLocal()
+    db: Session = SessionLocal()
     try:
         # IndependentProductMaster に新しいレコードを追加
         new_product = IndependentProductMaster(
