@@ -15,7 +15,7 @@ from create_db import Product, IncomingInfo, IncomingProduct
 from sqlalchemy import create_engine, Column, Integer, String, select, DECIMAL, ForeignKey, Boolean, DateTime, Date, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker, Session ,aliased
 
 from azure.storage.blob import BlobServiceClient,ContentSettings
 import uuid
@@ -583,13 +583,22 @@ async def upload_product(
 #指定された組織IDに紐づくメッセージ情報をすべて取得するエンドポイント
 @app.get("/messages/", tags=["Message Operations"])
 def get_messages(organization_id: int, db: Session = Depends(get_db)):
+    sender_alias = aliased(UserInformation)
+    receiver_alias = aliased(UserInformation)
     messages = (
-        db.query(Message)
-        .join(UserInformation,
-            (Message.sender_user_id == UserInformation.user_id) |
-            (Message.receiver_user_id == UserInformation.user_id)
+        db.query(
+            Message.message_id,
+            Message.sender_user_id,
+            Message.receiver_user_id,
+            Message.message_content,
+            Message.product_id,
+            Message.send_date,
+            sender_alias.user_name.label('sender_user_name'),
+            receiver_alias.user_name.label('receiver_user_name')
         )
-        .filter(UserInformation.organization_id == organization_id)
+        .join(sender_alias, Message.sender_user_id == sender_alias.user_id)
+        .join(receiver_alias, Message.receiver_user_id == receiver_alias.user_id)
+        .filter(sender_alias.organization_id == organization_id)
         .all()
     )
     if not messages:
@@ -603,20 +612,21 @@ def get_messages(organization_id: int, db: Session = Depends(get_db)):
                 "message_content": message.message_content,
                 "product_id": message.product_id,
                 "send_date": message.send_date.isoformat() if message.send_date else None,
+                "sender_user_name": message.sender_user_name,
+                "receiver_user_name": message.receiver_user_name
             }
             for message in messages
         ]
     }
 
 #指定された組織IDに紐づくメッセージの回数を取得するエンドポイント
-@app.get("/messages/count/", tags=["DashBoard"])
+@app.get("/send_messages/count/", tags=["DashBoard"])
 def get_messages_count(organization_id: int, db: Session = Depends(get_db)):
     try:
         messages_count = (
             db.query(func.count(Message.message_id))
             .join(UserInformation,
-                (Message.sender_user_id == UserInformation.user_id) | 
-                (Message.receiver_user_id == UserInformation.user_id)
+                (Message.sender_user_id == UserInformation.user_id) 
             )
             .filter(UserInformation.organization_id == organization_id)
             .scalar()
