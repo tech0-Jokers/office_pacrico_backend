@@ -12,7 +12,7 @@ from typing import Optional, List
 from pydantic import BaseModel  # Pydanticモデルをインポート
 from create_db import Product, IncomingInfo, IncomingProduct
 
-from sqlalchemy import create_engine, Column, Integer, String, select, DECIMAL, ForeignKey, Boolean, DateTime, Date, func
+from sqlalchemy import create_engine, Column, Integer, String, select, DECIMAL, ForeignKey, Boolean, DateTime, Date, Text, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session ,aliased
@@ -222,6 +222,13 @@ class Organization(Base):
     organization_id = Column(Integer, primary_key=True)
     organization_name = Column(String(255))
 
+class ReplyComments(Base):
+    __tablename__ = 'reply_comments'
+    reply_comment_id = Column(Integer, primary_key=True, index=True)  
+    message_id = Column(Integer, ForeignKey('message.message_id'), nullable=False)  
+    comment_user_id = Column(Integer, ForeignKey('userinformation.user_id'), nullable=False)  
+    message_content = Column(Text, nullable=True)  
+    send_date = Column(DateTime, nullable=False, default=lambda: datetime.now(japan_timezone))  
 
 # お菓子のデータモデル（リクエスト/レスポンス用）
 class Candy(BaseModel):
@@ -602,23 +609,52 @@ def get_messages(organization_id: int, db: Session = Depends(get_db)):
         .filter(sender_alias.organization_id == organization_id)
         .all()
     )
+
     if not messages:
         raise HTTPException(status_code=404, detail="No messages found for this organization")
-    return {
-        "messages": [
-            {
-                "message_id": message.message_id,
-                "sender_user_id": message.sender_user_id,
-                "receiver_user_id": message.receiver_user_id,
-                "message_content": message.message_content,
-                "product_id": message.product_id,
-                "send_date": message.send_date.isoformat() if message.send_date else None,
-                "sender_user_name": message.sender_user_name,
-                "receiver_user_name": message.receiver_user_name
+    
+    # メッセージごとのデータを構造化
+    result = {}
+    for message in messages:
+        message_id = message.Message.message_id
+        if message_id not in result:
+            result[message_id] = {
+                "message_id": message.Message.message_id,
+                "sender_user_id": message.Message.sender_user_id,
+                "receiver_user_id": message.Message.receiver_user_id,
+                "message_content": message.Message.message_content,
+                "product_id": message.Message.product_id,
+                "product_name": (
+                    message.IndependentProductMaster.product_name
+                    if message.IndependentProductMaster else None
+                ) or (
+                    message.MeitexProductMaster.product_name
+                    if message.MeitexProductMaster else None
+                ),
+                "product_image_url": (
+                    message.IndependentProductMaster.product_image_url
+                    if message.IndependentProductMaster else None
+                ) or (
+                    message.MeitexProductMaster.product_image_url
+                    if message.MeitexProductMaster else None
+                ),
+                "send_date": message.Message.send_date.isoformat() if message.Message.send_date else None,
+                "reply_comments": []
             }
-            for message in messages
-        ]
-    }
+        
+        # コメントを追加
+        if message.ReplyComments:
+            result[message_id]["reply_comments"].append({
+                "reply_comment_id": message.ReplyComments.reply_comment_id,
+                "comment_user_id": message.ReplyComments.comment_user_id,
+                "message_content": message.ReplyComments.message_content,
+                "send_date": message.ReplyComments.send_date.isoformat() if message.ReplyComments.send_date else None
+            })
+    
+    return {"messages": list(result.values())}
+
+
+
 
 #指定された組織IDに紐づくメッセージの回数を取得するエンドポイント
 @app.get("/send_messages/count/", tags=["DashBoard"])
