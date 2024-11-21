@@ -591,22 +591,29 @@ async def upload_product(
 #指定された組織IDに紐づくメッセージ情報をすべて取得するエンドポイント
 @app.get("/messages/", tags=["Message Operations"])
 def get_messages(organization_id: int, db: Session = Depends(get_db)):
+    # UserInformationテーブルのエイリアスを作成
     sender_alias = aliased(UserInformation)
     receiver_alias = aliased(UserInformation)
+    
+    # クエリの実行
     messages = (
         db.query(
-            Message.message_id,
-            Message.sender_user_id,
-            Message.receiver_user_id,
-            Message.message_content,
-            Message.product_id,
-            Message.send_date,
-            sender_alias.user_name.label('sender_user_name'),
-            receiver_alias.user_name.label('receiver_user_name')
+            Message,
+            IntegratedProduct,
+            IndependentProductMaster,
+            MeitexProductMaster,
+            ReplyComments,
+            sender_alias.user_name.label("sender_user_name"),
+            receiver_alias.user_name.label("receiver_user_name")
         )
         .join(sender_alias, Message.sender_user_id == sender_alias.user_id)
         .join(receiver_alias, Message.receiver_user_id == receiver_alias.user_id)
+        .join(IntegratedProduct, Message.product_id == IntegratedProduct.product_id)
+        .outerjoin(IndependentProductMaster, IntegratedProduct.independent_product_id == IndependentProductMaster.independent_product_id)
+        .outerjoin(MeitexProductMaster, IntegratedProduct.meitex_product_id == MeitexProductMaster.meitex_product_id)
+        .outerjoin(ReplyComments, ReplyComments.message_id == Message.message_id)
         .filter(sender_alias.organization_id == organization_id)
+        .filter(receiver_alias.organization_id == organization_id)
         .all()
     )
 
@@ -621,7 +628,9 @@ def get_messages(organization_id: int, db: Session = Depends(get_db)):
             result[message_id] = {
                 "message_id": message.Message.message_id,
                 "sender_user_id": message.Message.sender_user_id,
+                "sender_user_name": message.sender_user_name,
                 "receiver_user_id": message.Message.receiver_user_id,
+                "receiver_user_name": message.receiver_user_name,
                 "message_content": message.Message.message_content,
                 "product_id": message.Message.product_id,
                 "product_name": (
