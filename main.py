@@ -283,6 +283,7 @@ class IncomingRegisterRequest(BaseModel):
 def read_root():
     return {"message": "こんにちはOffice Paclicoだよ!"}
 
+#組織IDに応じて在庫情報を返すAPI
 @app.get("/products/{organization_id}", response_model=list[ProductResponse], tags=["Product Operations"])
 def get_products_by_organization(organization_id: int, db: Session = Depends(get_db)):
     print(organization_id)
@@ -722,7 +723,7 @@ class UploadImageResponse(BaseModel):
     message: str
     filename: str
 
-
+# 画像をアップロードするエンドポイント
 @app.post("/upload_image", response_model=UploadImageResponse, tags=["Image Operations"])
 async def upload_image(file: UploadFile = File(...)):
     blob_client = blob_service_client.get_blob_client(container=AZURE_CONTAINER_NAME, blob=file.filename)
@@ -740,6 +741,71 @@ async def upload_image(file: UploadFile = File(...)):
 
     os.remove(file.filename)  # ローカルに保存したファイルを削除
     return {"message": "Image uploaded successfully", "filename": file.filename, "url": blob_url}
+
+class PurchaseItem(BaseModel):
+    product_id: int
+    purchase_quantity: int
+
+class PurchaseRequest(BaseModel):
+    organization_id: int
+    purchases: List[PurchaseItem]
+
+# 在庫数を更新するエンドポイント
+@app.put("/inventory_products/purchase", tags=["Product Operations"])
+def purchase_products(purchase_request: PurchaseRequest, db: Session = Depends(get_db)):
+    try:
+        organization_id = purchase_request.organization_id
+        results = []
+
+        for purchase in purchase_request.purchases:
+            # 在庫情報を取得
+            inventory_product = (
+                db.query(InventoryProduct)
+                .filter(
+                    InventoryProduct.organization_id == organization_id,
+                    InventoryProduct.product_id == purchase.product_id
+                )
+                .first()
+            )
+
+            # 商品が存在しない場合のエラーハンドリング
+            if not inventory_product:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Product with ID {purchase.product_id} not found"
+                )
+
+            # 在庫数が不足している場合のエラーハンドリング
+            if inventory_product.stock_quantity < purchase.purchase_quantity:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Insufficient stock for product ID {purchase.product_id}"
+                )
+
+            # 在庫数を更新
+            inventory_product.stock_quantity -= purchase.purchase_quantity
+
+            # 結果を収集
+            results.append({
+                "product_id": purchase.product_id,
+                "purchased_quantity": purchase.purchase_quantity,
+                "remaining_stock": inventory_product.stock_quantity
+            })
+
+        # データベースを保存
+        db.commit()
+
+        # レスポンス作成
+        return {
+            "message": "Purchase successful",
+            "results": results
+        }
+
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        db.rollback()  # 失敗した場合はロールバック
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
 
 # main.pyに追加
 @app.get("/test")
