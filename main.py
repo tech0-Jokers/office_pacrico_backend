@@ -787,7 +787,7 @@ class PurchaseRequest(BaseModel):
     purchases: List[PurchaseItem]
 
 # 在庫数を更新するエンドポイント
-@app.put("/inventory_products/purchase", tags=["Product Operations"])
+@app.put("/inventory_products/purchase/", tags=["Product Operations"])
 def purchase_products(purchase_request: PurchaseRequest, db: Session = Depends(get_db)):
     try:
         organization_id = purchase_request.organization_id
