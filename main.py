@@ -649,7 +649,8 @@ def get_messages(organization_id: int, db: Session = Depends(get_db)):
                     if message.MeitexProductMaster else None
                 ),
                 "send_date": message.Message.send_date.isoformat() if message.Message.send_date else None,
-                "reply_comments": []
+                "reply_comments": [],
+                "count_of_likes": message.Message.count_of_likes
             }
         
         # コメントを追加
