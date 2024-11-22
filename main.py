@@ -203,6 +203,7 @@ class Message(Base):
     receiver_user_id = Column(Integer, ForeignKey('userinformation.user_id'), nullable=False)  # ユーザーテーブルがある場合
     product_id = Column(Integer, ForeignKey('MeitexProductMaster.meitex_product_id'), nullable=False)
     send_date = Column(DateTime, nullable=False, default=lambda: datetime.now(japan_timezone))  # デフォルトを日本時間に設定
+    count_of_likes = Column(Integer, default=0)
 
 class UserInformation(Base):
     __tablename__ = 'userinformation'  
@@ -701,6 +702,27 @@ def get_messages(sender_user_id: int, receiver_user_id: int, product_id: int, db
         return {"message": "No messages found between the specified users."}
     
     return messages
+
+# メッセージのいいね数を増やすエンドポイント
+@app.put("/like_message/{message_id}", tags=["Message Operations"])
+def like_message(message_id: int, db: Session = Depends(get_db)):
+    try:
+        # メッセージを取得
+        message = db.query(Message).filter(Message.message_id == message_id).first()
+        
+        # メッセージが存在しない場合のエラーハンドリング
+        if not message:
+            raise HTTPException(status_code=404, detail="メッセージが見つかりません")
+        
+        # いいね数を増やす
+        message.count_of_likes += 1
+        db.commit()
+        
+        return {"message": "いいね数が増加しました"}
+    
+    except Exception as e:
+        print(f"Error occurred: {e}")
+        raise HTTPException(status_code=500, detail="いいね数の増加中にエラーが発生しました")
 
 # 新しいメッセージを追加するエンドポイント
 @app.post("/add_message/", tags=["Message Operations"])
