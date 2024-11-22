@@ -5,17 +5,17 @@ import pytz
 import logging
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, Depends, HTTPException, Response, File, UploadFile, Form, Response, File, UploadFile
+from fastapi import FastAPI, Depends, HTTPException, Response, File, UploadFile, Form, Response, File, UploadFile, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from typing import Optional, List
 from pydantic import BaseModel  # Pydanticモデルをインポート
 from create_db import Product, IncomingInfo, IncomingProduct
 
-from sqlalchemy import create_engine, Column, Integer, String, select, DECIMAL, ForeignKey, Boolean, DateTime, Date, Text
+from sqlalchemy import create_engine, Column, Integer, String, select, DECIMAL, ForeignKey, Boolean, DateTime, Date, Text, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker, Session ,aliased
 
 from azure.storage.blob import BlobServiceClient,ContentSettings
 import uuid
@@ -203,6 +203,7 @@ class Message(Base):
     receiver_user_id = Column(Integer, ForeignKey('userinformation.user_id'), nullable=False)  # ユーザーテーブルがある場合
     product_id = Column(Integer, ForeignKey('MeitexProductMaster.meitex_product_id'), nullable=False)
     send_date = Column(DateTime, nullable=False, default=lambda: datetime.now(japan_timezone))  # デフォルトを日本時間に設定
+    count_of_likes = Column(Integer, default=0)
 
 class UserInformation(Base):
     __tablename__ = 'userinformation'  
@@ -290,6 +291,7 @@ class IncomingRegisterRequest(BaseModel):
 def read_root():
     return {"message": "こんにちはOffice Paclicoだよ!"}
 
+#組織IDに応じて在庫情報を返すAPI
 @app.get("/products/{organization_id}", response_model=list[ProductResponse], tags=["Product Operations"])
 def get_products_by_organization(organization_id: int, db: Session = Depends(get_db)):
     print(organization_id)
@@ -587,23 +589,32 @@ async def upload_product(
     finally:
         db.close()
 
-#指定された組織IDに紐づくメッセージ情報をすべて取得するエンドポイント（）
-@app.get("/messages/")
+#指定された組織IDに紐づくメッセージ情報をすべて取得するエンドポイント
+@app.get("/messages/", tags=["Message Operations"])
 def get_messages(organization_id: int, db: Session = Depends(get_db)):
+    # UserInformationテーブルのエイリアスを作成
+    sender_alias = aliased(UserInformation)
+    receiver_alias = aliased(UserInformation)
+    
+    # クエリの実行
     messages = (
         db.query(
             Message,
             IntegratedProduct,
             IndependentProductMaster,
             MeitexProductMaster,
-            ReplyComments
+            ReplyComments,
+            sender_alias.user_name.label("sender_user_name"),
+            receiver_alias.user_name.label("receiver_user_name")
         )
-        .join(UserInformation, (Message.sender_user_id == UserInformation.user_id) | (Message.receiver_user_id == UserInformation.user_id))
+        .join(sender_alias, Message.sender_user_id == sender_alias.user_id)
+        .join(receiver_alias, Message.receiver_user_id == receiver_alias.user_id)
         .join(IntegratedProduct, Message.product_id == IntegratedProduct.product_id)
         .outerjoin(IndependentProductMaster, IntegratedProduct.independent_product_id == IndependentProductMaster.independent_product_id)
         .outerjoin(MeitexProductMaster, IntegratedProduct.meitex_product_id == MeitexProductMaster.meitex_product_id)
         .outerjoin(ReplyComments, ReplyComments.message_id == Message.message_id)
-        .filter(UserInformation.organization_id == organization_id)
+        .filter(sender_alias.organization_id == organization_id)
+        .filter(receiver_alias.organization_id == organization_id)
         .all()
     )
 
@@ -618,7 +629,9 @@ def get_messages(organization_id: int, db: Session = Depends(get_db)):
             result[message_id] = {
                 "message_id": message.Message.message_id,
                 "sender_user_id": message.Message.sender_user_id,
+                "sender_user_name": message.sender_user_name,
                 "receiver_user_id": message.Message.receiver_user_id,
+                "receiver_user_name": message.receiver_user_name,
                 "message_content": message.Message.message_content,
                 "product_id": message.Message.product_id,
                 "product_name": (
@@ -636,7 +649,8 @@ def get_messages(organization_id: int, db: Session = Depends(get_db)):
                     if message.MeitexProductMaster else None
                 ),
                 "send_date": message.Message.send_date.isoformat() if message.Message.send_date else None,
-                "reply_comments": []
+                "reply_comments": [],
+                "count_of_likes": message.Message.count_of_likes
             }
         
         # コメントを追加
@@ -653,6 +667,29 @@ def get_messages(organization_id: int, db: Session = Depends(get_db)):
 
 
 
+#指定された組織IDに紐づくメッセージの回数を取得するエンドポイント
+@app.get("/send_messages/count/", tags=["DashBoard"])
+def get_messages_count(organization_id: int, db: Session = Depends(get_db)):
+    try:
+        messages_count = (
+            db.query(func.count(Message.message_id))
+            .join(UserInformation,
+                (Message.sender_user_id == UserInformation.user_id) 
+            )
+            .filter(UserInformation.organization_id == organization_id)
+            .scalar()
+        )
+        
+        return {
+            "organization_id": organization_id,
+            "total_messages": messages_count
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"メッセージ数の取得中にエラーが発生しました: {str(e)}"
+        )
 
 #メッセージを取得するエンドポイント
 @app.get("/get_messages/", tags=["Message Operations"])
@@ -666,6 +703,27 @@ def get_messages(sender_user_id: int, receiver_user_id: int, product_id: int, db
         return {"message": "No messages found between the specified users."}
     
     return messages
+
+# メッセージのいいね数を増やすエンドポイント
+@app.put("/like_message/{message_id}", tags=["Message Operations"])
+def like_message(message_id: int, db: Session = Depends(get_db)):
+    try:
+        # メッセージを取得
+        message = db.query(Message).filter(Message.message_id == message_id).first()
+        
+        # メッセージが存在しない場合のエラーハンドリング
+        if not message:
+            raise HTTPException(status_code=404, detail="メッセージが見つかりません")
+        
+        # いいね数を増やす
+        message.count_of_likes += 1
+        db.commit()
+        
+        return {"message": "いいね数が増加しました"}
+    
+    except Exception as e:
+        print(f"Error occurred: {e}")
+        raise HTTPException(status_code=500, detail="いいね数の増加中にエラーが発生しました")
 
 # 新しいメッセージを追加するエンドポイント
 @app.post("/add_message/", tags=["Message Operations"])
@@ -733,7 +791,7 @@ class UploadImageResponse(BaseModel):
     message: str
     filename: str
 
-
+# 画像をアップロードするエンドポイント
 @app.post("/upload_image", response_model=UploadImageResponse, tags=["Image Operations"])
 async def upload_image(file: UploadFile = File(...)):
     blob_client = blob_service_client.get_blob_client(container=AZURE_CONTAINER_NAME, blob=file.filename)
@@ -751,6 +809,71 @@ async def upload_image(file: UploadFile = File(...)):
 
     os.remove(file.filename)  # ローカルに保存したファイルを削除
     return {"message": "Image uploaded successfully", "filename": file.filename, "url": blob_url}
+
+class PurchaseItem(BaseModel):
+    product_id: int
+    purchase_quantity: int
+
+class PurchaseRequest(BaseModel):
+    organization_id: int
+    purchases: List[PurchaseItem]
+
+# 在庫数を更新するエンドポイント
+@app.put("/inventory_products/purchase/", tags=["Product Operations"])
+def purchase_products(purchase_request: PurchaseRequest, db: Session = Depends(get_db)):
+    try:
+        organization_id = purchase_request.organization_id
+        results = []
+
+        for purchase in purchase_request.purchases:
+            # 在庫情報を取得
+            inventory_product = (
+                db.query(InventoryProduct)
+                .filter(
+                    InventoryProduct.organization_id == organization_id,
+                    InventoryProduct.product_id == purchase.product_id
+                )
+                .first()
+            )
+
+            # 商品が存在しない場合のエラーハンドリング
+            if not inventory_product:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Product with ID {purchase.product_id} not found"
+                )
+
+            # 在庫数が不足している場合のエラーハンドリング
+            if inventory_product.stock_quantity < purchase.purchase_quantity:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Insufficient stock for product ID {purchase.product_id}"
+                )
+
+            # 在庫数を更新
+            inventory_product.stock_quantity -= purchase.purchase_quantity
+
+            # 結果を収集
+            results.append({
+                "product_id": purchase.product_id,
+                "purchased_quantity": purchase.purchase_quantity,
+                "remaining_stock": inventory_product.stock_quantity
+            })
+
+        # データベースを保存
+        db.commit()
+
+        # レスポンス作成
+        return {
+            "message": "Purchase successful",
+            "results": results
+        }
+
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        db.rollback()  # 失敗した場合はロールバック
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
 
 # main.pyに追加
 @app.get("/test")
