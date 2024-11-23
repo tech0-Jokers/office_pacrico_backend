@@ -757,6 +757,21 @@ def add_message(message_data: MessageCreate, db: Session = Depends(get_db)):
         logger.error(f"メッセージ追加時のエラー: {str(e)}")
         raise HTTPException(status_code=500, detail="メッセージを追加できませんでした")
 
+@app.post("/add_comments/", tags=["Message Operations"])
+def add_comment(message_id: int, comment_user_id: int, message_content: str, db: Session = Depends(get_db)):
+    # 新しいコメントを作成
+    new_comment = ReplyComments(
+        message_id=message_id,
+        comment_user_id=comment_user_id,
+        message_content=message_content,
+        send_date=datetime.now(japan_timezone)
+    )
+    db.add(new_comment)
+    db.commit()
+    db.refresh(new_comment)
+    return {"message": "Comment added successfully", "comment": new_comment}
+
+
 # 画像データを取得するエンドポイント
 @app.get("/images/{image_name}", tags=["Image Operations"])
 async def get_image(image_name: str):
