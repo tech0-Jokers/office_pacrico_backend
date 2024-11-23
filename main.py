@@ -486,17 +486,18 @@ async def register_incoming_products(
     jst_timezone = pytz.timezone('Asia/Tokyo')
     jst_time = utc_time.astimezone(jst_timezone)
 
-    # IncomingInformation にデータを挿入
-    incoming_info = IncomingInformation(
-        incoming_date=jst_time.date(),
-        purchase_amount=request.purchase_amount,
-        user_id=request.user_id,  # リクエストからユーザーIDを使用
-    )
-    db.add(incoming_info)
-    db.commit()
-    db.refresh(incoming_info)
-
+    # トランザクション開始
     try:
+        # IncomingInformation にデータを挿入
+        incoming_info = IncomingInformation(
+            incoming_date=jst_time.date(),
+            purchase_amount=request.purchase_amount,
+            user_id=request.user_id,  # リクエストからユーザーIDを使用
+        )
+        db.add(incoming_info)
+        db.commit()
+        db.refresh(incoming_info)
+
         # 商品情報の挿入と在庫更新
         for item in request.items:
             # Inventory_products から商品を取得（組織IDも一致するもの）
@@ -506,7 +507,7 @@ async def register_incoming_products(
             ).first()
 
             if not inventory_product:
-                #商品が存在しない場合、新規作成
+                # 商品が存在しない場合、新規作成
                 inventory_product = InventoryProduct(
                     product_id=item.product_id,
                     organization_id=request.organization_id,
@@ -516,8 +517,10 @@ async def register_incoming_products(
                 db.add(inventory_product)
 
             else:
-                #在庫数の更新（すでにあれば加算）
+                # 在庫数の更新（すでにあれば加算）
                 inventory_product.stock_quantity += item.incoming_quantity
+
+            db.commit()  # 在庫の更新を確定
 
             # Incoming_Products にデータを追加
             incoming_product = Incoming_Products(
@@ -527,11 +530,13 @@ async def register_incoming_products(
             )
             db.add(incoming_product)
 
-        db.commit()
+        db.commit()  # すべての変更を確定
         return {"message": "商品が正常に登録され、在庫が更新されました"}
+
     except Exception as e:
-        db.rollback()
+        db.rollback()  # すべての変更をロールバック
         raise HTTPException(status_code=500, detail=f"エラーが発生しました: {str(e)}")
+
 
 # 独自商品を新規で登録するエンドポイント
 @app.post("/api/newsnacks/")
