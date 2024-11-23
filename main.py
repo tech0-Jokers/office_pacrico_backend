@@ -286,6 +286,9 @@ class IncomingRegisterRequest(BaseModel):
     organization_id: int
     items: List[Item]
 
+class UpdatePriceRequest(BaseModel):
+    sales_amount: float
+
 # ルートエンドポイント: こんにちはを表示
 @app.get("/")
 def read_root():
@@ -588,6 +591,39 @@ async def upload_product(
         raise HTTPException(status_code=500, detail=f"データベースへの製品情報の挿入に失敗しました: {str(e)}")
     finally:
         db.close()
+
+#販売価格設定のエンドポイント
+@app.put("/inventory_products/{organization_id}/update_price/{product_id}")
+def update_price(
+    organization_id: int,
+    product_id: int,
+    request: UpdatePriceRequest,
+    db: Session = Depends(get_db)
+):
+    # 指定された商品を検索
+    product = db.query(InventoryProduct).filter_by(
+        organization_id=organization_id,
+        product_id=product_id
+    ).first()
+
+    if not product:
+        # 商品が見つからない場合はエラーを返す
+        raise HTTPException(status_code=404, detail="Invalid product_id or organization_id")
+
+    # 値段を更新
+    product.sales_amount = request.sales_amount
+    db.commit()
+    db.refresh(product)
+
+    # 成功レスポンス
+    return {
+        "message": "Price updated successfully",
+        "updated_product": {
+            "organization_id": organization_id,
+            "product_id": product_id,
+            "sales_amount": product.sales_amount
+        }
+    }
 
 #指定された組織IDに紐づくメッセージ情報をすべて取得するエンドポイント
 @app.get("/messages/", tags=["Message Operations"])
