@@ -1,6 +1,6 @@
 import os
 from pytz import timezone
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import pytz
 import logging
 from dotenv import load_dotenv
@@ -19,6 +19,8 @@ from sqlalchemy.orm import sessionmaker, Session ,aliased
 
 from azure.storage.blob import BlobServiceClient,ContentSettings
 import uuid
+
+import jwt
 
 # .env.local ファイルを明示的に指定して環境変数を読み込む
 load_dotenv(dotenv_path=".env.local")
@@ -57,6 +59,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# JWTの設定
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = "HS256"
 
 # 日本時間のタイムゾーンを取得
 japan_timezone = pytz.timezone('Asia/Tokyo')
@@ -219,9 +225,12 @@ class Incoming_Products(Base):
     incoming_quantity = Column(Integer)
 
 class Organization(Base):
-    __tablename__ = 'organization'  
-    organization_id = Column(Integer, primary_key=True)
-    organization_name = Column(String(255))
+    __tablename__ = "organization"
+    organization_id = Column(Integer, primary_key=True, index=True)  # 組織ID
+    organization_name = Column(String(255), nullable=True)  # 組織名
+    qr_generation_token = Column(String(255), nullable=True)  # トークン
+    token_expiry_date = Column(DateTime, nullable=True)  # トークン有効期限
+    token_status = Column(Boolean, default=True)  # トークン状態（有効/無効）
 
 class ReplyComments(Base):
     __tablename__ = 'reply_comments'
@@ -930,6 +939,43 @@ def purchase_products(purchase_request: PurchaseRequest, db: Session = Depends(g
     except Exception as e:
         db.rollback()  # 失敗した場合はロールバック
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+
+#トークン取得・生成エンドポイント
+@app.get("/get_token/{organization_id}")
+def get_or_generate_token(organization_id: int, db: Session = Depends(get_db)):
+    # データベースから該当する組織を検索
+    organization = db.query(Organization).filter(Organization.organization_id == organization_id).first()
+
+    if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    # 現在の日本時間
+    current_time = datetime.now(japan_timezone)
+
+    # 既存トークンが有効であればそのまま返す
+    if organization.qr_generation_token and organization.token_expiry_date and organization.token_expiry_date > current_time:
+        return {
+            "token": organization.qr_generation_token,
+            "expires_at": organization.token_expiry_date.strftime('%Y-%m-%d %H:%M:%S')  # 日本時間の有効期限
+        }
+
+    # 新しいトークンを生成
+    new_token = jwt.encode(
+        {"organization_id": organization_id, "exp": current_time + timedelta(hours=1)},
+        SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
+    # 有効期限を日本時間で設定
+    new_expiry_date = current_time + timedelta(hours=1)
+
+    # データベースを更新（日本時間で保存）
+    organization.qr_generation_token = new_token
+    organization.token_expiry_date = new_expiry_date
+    organization.token_status = True  # トークン状態を有効に設定
+    db.commit()
+
+    #トークンを返す
+    return {"token": new_token}
 
 # main.pyに追加
 @app.get("/test")
