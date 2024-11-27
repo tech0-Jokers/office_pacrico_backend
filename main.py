@@ -949,15 +949,21 @@ def get_or_generate_token(organization_id: int, db: Session = Depends(get_db)):
     if not organization:
         raise HTTPException(status_code=404, detail="Organization not found")
 
-    # 現在の日本時間
+    # 現在の日本時間を取得（タイムゾーンあり）
     current_time = datetime.now(japan_timezone)
 
-    # 既存トークンが有効であればそのまま返す
-    if organization.qr_generation_token and organization.token_expiry_date and organization.token_expiry_date > current_time:
-        return {
-            "token": organization.qr_generation_token,
-            "expires_at": organization.token_expiry_date.strftime('%Y-%m-%d %H:%M:%S')  # 日本時間の有効期限
-        }
+    # 既存トークンが有効か確認
+    if organization.qr_generation_token and organization.token_expiry_date:
+        # `organization.token_expiry_date` を日本時間に変換
+        expiry_date_jst = organization.token_expiry_date
+        if expiry_date_jst.tzinfo is None:  # タイムゾーンがない場合
+            expiry_date_jst = expiry_date_jst.replace(tzinfo=japan_timezone)
+
+        # 有効期限と現在時刻を比較
+        if expiry_date_jst > current_time:
+            return {
+                "token": organization.qr_generation_token
+            }
 
     # 新しいトークンを生成
     new_token = jwt.encode(
@@ -965,7 +971,8 @@ def get_or_generate_token(organization_id: int, db: Session = Depends(get_db)):
         SECRET_KEY,
         algorithm=ALGORITHM,
     )
-    # 有効期限を日本時間で設定
+
+    # 新しい有効期限を日本時間で設定
     new_expiry_date = current_time + timedelta(hours=1)
 
     # データベースを更新（日本時間で保存）
@@ -974,8 +981,10 @@ def get_or_generate_token(organization_id: int, db: Session = Depends(get_db)):
     organization.token_status = True  # トークン状態を有効に設定
     db.commit()
 
-    #トークンを返す
-    return {"token": new_token}
+    #新しいトークンを返す
+    return {
+        "token": new_token
+    }
 
 # main.pyに追加
 @app.get("/test")
