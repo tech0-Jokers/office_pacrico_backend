@@ -275,6 +275,13 @@ class ProductResponseForAmbassador(BaseModel):
 class ProductResponseForAmbassadorWithList(BaseModel):
     products: List[ProductResponseForAmbassador]
 
+class UserInformationResponse(BaseModel):
+    user_id: int
+    user_name: str
+
+    class Config:
+        orm_mode = True
+
 class Item(BaseModel):
     product_id: int
     incoming_quantity: int
@@ -588,6 +595,29 @@ async def upload_product(
         raise HTTPException(status_code=500, detail=f"データベースへの製品情報の挿入に失敗しました: {str(e)}")
     finally:
         db.close()
+
+#指定された組織IDに紐づくユーザー情報を取得するエンドポイント
+@app.get("/get_user_information/", response_model=list[UserInformationResponse], tags=["DateBase"])
+def get_user_information(organization_id: int, db: Session = Depends(get_db)):
+    try:
+        if not isinstance(organization_id, int):
+            raise HTTPException(status_code=400, detail="organization_id は整数で指定してください")
+        
+        user_information = db.query(UserInformation).filter(
+            UserInformation.organization_id == organization_id
+        ).all()
+
+        if not user_information:
+            raise HTTPException(status_code=404, detail="指定された組織にユーザーが見つかりません")
+        
+        return user_information
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"内部エラーが発生しました: {str(e)}"
+        )
 
 #指定された組織IDに紐づくメッセージ情報をすべて取得するエンドポイント
 @app.get("/messages/", tags=["Message Operations"])
