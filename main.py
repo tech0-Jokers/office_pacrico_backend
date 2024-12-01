@@ -1,6 +1,6 @@
 import os
 from pytz import timezone
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import pytz
 import logging
 from dotenv import load_dotenv
@@ -19,6 +19,8 @@ from sqlalchemy.orm import sessionmaker, Session ,aliased
 
 from azure.storage.blob import BlobServiceClient,ContentSettings
 import uuid
+
+import jwt
 
 # .env.local ファイルを明示的に指定して環境変数を読み込む
 load_dotenv(dotenv_path=".env.local")
@@ -57,6 +59,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# JWTの設定
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = "HS256"
 
 # 日本時間のタイムゾーンを取得
 japan_timezone = pytz.timezone('Asia/Tokyo')
@@ -219,9 +225,12 @@ class Incoming_Products(Base):
     incoming_quantity = Column(Integer)
 
 class Organization(Base):
-    __tablename__ = 'organization'  
-    organization_id = Column(Integer, primary_key=True)
-    organization_name = Column(String(255))
+    __tablename__ = "organization"
+    organization_id = Column(Integer, primary_key=True, index=True)  # 組織ID
+    organization_name = Column(String(255), nullable=True)  # 組織名
+    qr_generation_token = Column(String(255), nullable=True)  # トークン
+    token_expiry_date = Column(DateTime, nullable=True)  # トークン有効期限
+    token_status = Column(Boolean, default=True)  # トークン状態（有効/無効）
 
 class ReplyComments(Base):
     __tablename__ = 'reply_comments'
@@ -292,6 +301,9 @@ class IncomingRegisterRequest(BaseModel):
     user_id: int
     organization_id: int
     items: List[Item]
+
+class UpdatePriceRequest(BaseModel):
+    sales_amount: float
 
 # ルートエンドポイント: こんにちはを表示
 @app.get("/")
@@ -490,17 +502,18 @@ async def register_incoming_products(
     jst_timezone = pytz.timezone('Asia/Tokyo')
     jst_time = utc_time.astimezone(jst_timezone)
 
-    # IncomingInformation にデータを挿入
-    incoming_info = IncomingInformation(
-        incoming_date=jst_time.date(),
-        purchase_amount=request.purchase_amount,
-        user_id=request.user_id,  # リクエストからユーザーIDを使用
-    )
-    db.add(incoming_info)
-    db.commit()
-    db.refresh(incoming_info)
-
+    # トランザクション開始
     try:
+        # IncomingInformation にデータを挿入
+        incoming_info = IncomingInformation(
+            incoming_date=jst_time.date(),
+            purchase_amount=request.purchase_amount,
+            user_id=request.user_id,  # リクエストからユーザーIDを使用
+        )
+        db.add(incoming_info)
+        db.commit()
+        db.refresh(incoming_info)
+
         # 商品情報の挿入と在庫更新
         for item in request.items:
             # Inventory_products から商品を取得（組織IDも一致するもの）
@@ -510,7 +523,7 @@ async def register_incoming_products(
             ).first()
 
             if not inventory_product:
-                #商品が存在しない場合、新規作成
+                # 商品が存在しない場合、新規作成
                 inventory_product = InventoryProduct(
                     product_id=item.product_id,
                     organization_id=request.organization_id,
@@ -520,8 +533,10 @@ async def register_incoming_products(
                 db.add(inventory_product)
 
             else:
-                #在庫数の更新（すでにあれば加算）
+                # 在庫数の更新（すでにあれば加算）
                 inventory_product.stock_quantity += item.incoming_quantity
+
+            db.commit()  # 在庫の更新を確定
 
             # Incoming_Products にデータを追加
             incoming_product = Incoming_Products(
@@ -531,11 +546,13 @@ async def register_incoming_products(
             )
             db.add(incoming_product)
 
-        db.commit()
+        db.commit()  # すべての変更を確定
         return {"message": "商品が正常に登録され、在庫が更新されました"}
+
     except Exception as e:
-        db.rollback()
+        db.rollback()  # すべての変更をロールバック
         raise HTTPException(status_code=500, detail=f"エラーが発生しました: {str(e)}")
+
 
 # 独自商品を新規で登録するエンドポイント
 @app.post("/api/newsnacks/")
@@ -595,6 +612,39 @@ async def upload_product(
         raise HTTPException(status_code=500, detail=f"データベースへの製品情報の挿入に失敗しました: {str(e)}")
     finally:
         db.close()
+
+#販売価格設定のエンドポイント
+@app.put("/inventory_products/{organization_id}/update_price/{product_id}")
+def update_price(
+    organization_id: int,
+    product_id: int,
+    request: UpdatePriceRequest,
+    db: Session = Depends(get_db)
+):
+    # 指定された商品を検索
+    product = db.query(InventoryProduct).filter_by(
+        organization_id=organization_id,
+        product_id=product_id
+    ).first()
+
+    if not product:
+        # 商品が見つからない場合はエラーを返す
+        raise HTTPException(status_code=404, detail="Invalid product_id or organization_id")
+
+    # 値段を更新
+    product.sales_amount = request.sales_amount
+    db.commit()
+    db.refresh(product)
+
+    # 成功レスポンス
+    return {
+        "message": "Price updated successfully",
+        "updated_product": {
+            "organization_id": organization_id,
+            "product_id": product_id,
+            "sales_amount": product.sales_amount
+        }
+    }
 
 #指定された組織IDに紐づくユーザー情報を取得するエンドポイント
 @app.get("/get_user_information/", response_model=list[UserInformationResponse], tags=["DateBase"])
@@ -790,6 +840,21 @@ def add_message(message_data: MessageCreate, db: Session = Depends(get_db)):
         logger.error(f"メッセージ追加時のエラー: {str(e)}")
         raise HTTPException(status_code=500, detail="メッセージを追加できませんでした")
 
+@app.post("/add_comments/", tags=["Message Operations"])
+def add_comment(message_id: int, comment_user_id: int, message_content: str, db: Session = Depends(get_db)):
+    # 新しいコメントを作成
+    new_comment = ReplyComments(
+        message_id=message_id,
+        comment_user_id=comment_user_id,
+        message_content=message_content,
+        send_date=datetime.now(japan_timezone)
+    )
+    db.add(new_comment)
+    db.commit()
+    db.refresh(new_comment)
+    return {"message": "Comment added successfully", "comment": new_comment}
+
+
 # 画像データを取得するエンドポイント
 @app.get("/images/{image_name}", tags=["Image Operations"])
 async def get_image(image_name: str):
@@ -907,6 +972,52 @@ def purchase_products(purchase_request: PurchaseRequest, db: Session = Depends(g
     except Exception as e:
         db.rollback()  # 失敗した場合はロールバック
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+
+#トークン取得・生成エンドポイント
+@app.get("/get_token/{organization_id}")
+def get_or_generate_token(organization_id: int, db: Session = Depends(get_db)):
+    # データベースから該当する組織を検索
+    organization = db.query(Organization).filter(Organization.organization_id == organization_id).first()
+
+    if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    # 現在の日本時間を取得（タイムゾーンあり）
+    current_time = datetime.now(japan_timezone)
+
+    # 既存トークンが有効か確認
+    if organization.qr_generation_token and organization.token_expiry_date:
+        # `organization.token_expiry_date` を日本時間に変換
+        expiry_date_jst = organization.token_expiry_date
+        if expiry_date_jst.tzinfo is None:  # タイムゾーンがない場合
+            expiry_date_jst = expiry_date_jst.replace(tzinfo=japan_timezone)
+
+        # 有効期限と現在時刻を比較
+        if expiry_date_jst > current_time:
+            return {
+                "token": organization.qr_generation_token
+            }
+
+    # 新しいトークンを生成
+    new_token = jwt.encode(
+        {"organization_id": organization_id, "exp": current_time + timedelta(hours=1)},
+        SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
+
+    # 新しい有効期限を日本時間で設定
+    new_expiry_date = current_time + timedelta(hours=1)
+
+    # データベースを更新（日本時間で保存）
+    organization.qr_generation_token = new_token
+    organization.token_expiry_date = new_expiry_date
+    organization.token_status = True  # トークン状態を有効に設定
+    db.commit()
+
+    #新しいトークンを返す
+    return {
+        "token": new_token
+    }
 
 # main.pyに追加
 @app.get("/test")
