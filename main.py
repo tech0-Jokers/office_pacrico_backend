@@ -20,7 +20,7 @@ from sqlalchemy.orm import sessionmaker, Session ,aliased
 from azure.storage.blob import BlobServiceClient,ContentSettings
 import uuid
 
-import jwt
+# import jwt
 
 # .env.local ファイルを明示的に指定して環境変数を読み込む
 load_dotenv(dotenv_path=".env.local")
