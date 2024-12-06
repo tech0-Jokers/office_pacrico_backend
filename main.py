@@ -212,11 +212,15 @@ class Message(Base):
     count_of_likes = Column(Integer, default=0)
 
 class UserInformation(Base):
-    __tablename__ = 'userinformation'  
-    user_id = Column(Integer, primary_key=True)
+    __tablename__ = "userinformation"
+    user_id = Column(Integer, primary_key=True, index=True)
     user_name = Column(String(255))
-    ambassador_flag = Column(Boolean)
-    organization_id = Column(Integer, ForeignKey("organization.organization_id"))
+    ambassador_flag = Column(Boolean, default=False)
+    organization_id = Column(Integer, ForeignKey("organization.organization_id"), nullable=False)
+    email_address = Column(String(255))
+    password = Column(String(255))
+    github_user_name = Column(String(255), unique=True, nullable=True)
+    github_id = Column(String(255), unique=True, nullable=True)
 
 class Incoming_Products(Base):
     __tablename__ = "Incoming_Products"
@@ -309,6 +313,32 @@ class UpdatePriceRequest(BaseModel):
 @app.get("/")
 def read_root():
     return {"message": "こんにちはOffice Paclicoだよ!"}
+
+@app.get("/organization/{github_id}")
+def get_organization(
+    github_id: str,
+    github_username: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    指定されたGitHub IDとユーザー名に基づき、organization_idを返す。
+    """
+    # ステップ1: GitHub IDが既に登録されている場合
+    user = db.query(UserInformation).filter(UserInformation.github_id == github_id).first()
+    if user:
+        return {"organization_id": user.organization_id}
+
+    # ステップ2: GitHubユーザー名が登録されている場合
+    if github_username:
+        user_with_username = db.query(UserInformation).filter(UserInformation.github_user_name == github_username).first()
+        if user_with_username:
+            # 初回認証としてGitHub IDを登録
+            user_with_username.github_id = github_id
+            db.commit()
+            return {"organization_id": user_with_username.organization_id}
+
+    # ステップ3: ユーザーが未登録の場合
+    return {"organization_id": 404}
 
 #組織IDに応じて在庫情報を返すAPI
 @app.get("/products/{organization_id}", response_model=list[ProductResponse], tags=["Product Operations"])
