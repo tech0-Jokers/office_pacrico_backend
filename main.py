@@ -20,7 +20,7 @@ from sqlalchemy.orm import sessionmaker, Session ,aliased
 from azure.storage.blob import BlobServiceClient,ContentSettings
 import uuid
 
-import jwt
+# import jwt
 
 # .env.local ファイルを明示的に指定して環境変数を読み込む
 load_dotenv(dotenv_path=".env.local")
@@ -287,6 +287,13 @@ class ProductResponseForAmbassador(BaseModel):
 
 class ProductResponseForAmbassadorWithList(BaseModel):
     products: List[ProductResponseForAmbassador]
+
+class UserInformationResponse(BaseModel):
+    user_id: int
+    user_name: str
+
+    class Config:
+        orm_mode = True
 
 class Item(BaseModel):
     product_id: int
@@ -669,13 +676,37 @@ def update_price(
         }
     }
 
+#指定された組織IDに紐づくユーザー情報を取得するエンドポイント
+@app.get("/get_user_information/", response_model=list[UserInformationResponse], tags=["DateBase"])
+def get_user_information(organization_id: int, db: Session = Depends(get_db)):
+    try:
+        if not isinstance(organization_id, int):
+            raise HTTPException(status_code=400, detail="organization_id は整数で指定してください")
+        
+        user_information = db.query(UserInformation).filter(
+            UserInformation.organization_id == organization_id
+        ).all()
+
+        if not user_information:
+            raise HTTPException(status_code=404, detail="指定された組織にユーザーが見つかりません")
+        
+        return user_information
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"内部エラーが発生しました: {str(e)}"
+        )
+
 #指定された組織IDに紐づくメッセージ情報をすべて取得するエンドポイント
 @app.get("/messages/", tags=["Message Operations"])
 def get_messages(organization_id: int, db: Session = Depends(get_db)):
     # UserInformationテーブルのエイリアスを作成
     sender_alias = aliased(UserInformation)
     receiver_alias = aliased(UserInformation)
-    
+    comment_user_alias = aliased(UserInformation)  # コメントしたユーザー用エイリアス
+
     # クエリの実行
     messages = (
         db.query(
@@ -685,7 +716,8 @@ def get_messages(organization_id: int, db: Session = Depends(get_db)):
             MeitexProductMaster,
             ReplyComments,
             sender_alias.user_name.label("sender_user_name"),
-            receiver_alias.user_name.label("receiver_user_name")
+            receiver_alias.user_name.label("receiver_user_name"),
+            comment_user_alias.user_name.label("comment_user_name")  # コメントユーザー名を取得
         )
         .join(sender_alias, Message.sender_user_id == sender_alias.user_id)
         .join(receiver_alias, Message.receiver_user_id == receiver_alias.user_id)
@@ -693,8 +725,10 @@ def get_messages(organization_id: int, db: Session = Depends(get_db)):
         .outerjoin(IndependentProductMaster, IntegratedProduct.independent_product_id == IndependentProductMaster.independent_product_id)
         .outerjoin(MeitexProductMaster, IntegratedProduct.meitex_product_id == MeitexProductMaster.meitex_product_id)
         .outerjoin(ReplyComments, ReplyComments.message_id == Message.message_id)
+        .outerjoin(comment_user_alias, ReplyComments.comment_user_id == comment_user_alias.user_id)  # コメントユーザーと結合
         .filter(sender_alias.organization_id == organization_id)
         .filter(receiver_alias.organization_id == organization_id)
+        .order_by(ReplyComments.reply_comment_id.asc())  # reply_comment_idの昇順でソート
         .all()
     )
 
@@ -738,13 +772,12 @@ def get_messages(organization_id: int, db: Session = Depends(get_db)):
             result[message_id]["reply_comments"].append({
                 "reply_comment_id": message.ReplyComments.reply_comment_id,
                 "comment_user_id": message.ReplyComments.comment_user_id,
+                "comment_user_name": message.comment_user_name,  # コメントしたユーザーの名前を追加
                 "message_content": message.ReplyComments.message_content,
                 "send_date": message.ReplyComments.send_date.isoformat() if message.ReplyComments.send_date else None
             })
     
     return {"messages": list(result.values())}
-
-
 
 
 #指定された組織IDに紐づくメッセージの回数を取得するエンドポイント
