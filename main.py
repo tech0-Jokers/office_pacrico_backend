@@ -203,12 +203,15 @@ class IncomingInformation(Base):
 
 class Message(Base):
     __tablename__ = 'message'
-    message_id = Column(Integer, primary_key=True, index=True)
-    message_content = Column(String(500), nullable=False)
-    sender_user_id = Column(Integer, ForeignKey('userinformation.user_id'), nullable=False)  # ユーザーテーブルがある場合
-    receiver_user_id = Column(Integer, ForeignKey('userinformation.user_id'), nullable=False)  # ユーザーテーブルがある場合
-    product_id = Column(Integer, ForeignKey('MeitexProductMaster.meitex_product_id'), nullable=False)
-    send_date = Column(DateTime, nullable=False, default=lambda: datetime.now(japan_timezone))  # デフォルトを日本時間に設定
+
+    message_id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    sender_user_id = Column(Integer, ForeignKey('userinformation.user_id'), nullable=False)
+    sender_user_name = Column(String(255), default=None) 
+    receiver_user_id = Column(Integer, ForeignKey('userinformation.user_id'), nullable=False)
+    receiver_user_name = Column(String(255), default=None)  
+    product_id = Column(Integer, ForeignKey('integrated_products.product_id'), default=None)  
+    message_content = Column(Text, nullable=True) 
+    send_date = Column(DateTime, nullable=False, default=lambda: datetime.now(japan_timezone))  #デフォルトを日本時間に設定
     count_of_likes = Column(Integer, default=0)
 
 class UserInformation(Base):
@@ -241,6 +244,7 @@ class ReplyComments(Base):
     reply_comment_id = Column(Integer, primary_key=True, index=True)  
     message_id = Column(Integer, ForeignKey('message.message_id'), nullable=False)  
     comment_user_id = Column(Integer, ForeignKey('userinformation.user_id'), nullable=False)  
+    comment_user_name = Column(String(255), default=None)
     message_content = Column(Text, nullable=True)  
     send_date = Column(DateTime, nullable=False, default=lambda: datetime.now(japan_timezone))  
 
@@ -262,6 +266,8 @@ class MessageCreate(BaseModel):
     message_content: str
     sender_user_id: int # 送信者のID
     receiver_user_id: int  # 受信者のID
+    sender_user_name: str
+    receiver_user_name: str
     product_id: int  # 商品のID
 
 class ProductResponse(BaseModel):
@@ -849,7 +855,9 @@ def add_message(message_data: MessageCreate, db: Session = Depends(get_db)):
         new_message = Message(
             message_content=message_data.message_content,  # フィールド名を合わせる
             sender_user_id=message_data.sender_user_id,    # フィールド名を合わせる
+            sender_user_name=message_data.sender_user_name,
             receiver_user_id=message_data.receiver_user_id,
+            receiver_user_name=message_data.receiver_user_name,
             product_id=message_data.product_id,
             send_date=datetime.now(japan_timezone)  # UTCに統一
         )
@@ -871,11 +879,12 @@ def add_message(message_data: MessageCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="メッセージを追加できませんでした")
 
 @app.post("/add_comments/", tags=["Message Operations"])
-def add_comment(message_id: int, comment_user_id: int, message_content: str, db: Session = Depends(get_db)):
+def add_comment(message_id: int, comment_user_id: int, message_content: str, comment_user_name: str, db: Session = Depends(get_db)):
     # 新しいコメントを作成
     new_comment = ReplyComments(
         message_id=message_id,
         comment_user_id=comment_user_id,
+        comment_user_name=comment_user_name,
         message_content=message_content,
         send_date=datetime.now(japan_timezone)
     )
@@ -1048,6 +1057,30 @@ def get_or_generate_token(organization_id: int, db: Session = Depends(get_db)):
     return {
         "token": new_token
     }
+
+# トークン有効性チェックAPI
+@app.post("/validate-token/")
+def validate_token(organization_id: int, qr_generation_token: str, db: Session = Depends(get_db)):
+    #対応するレコードを取得
+    organization = db.query(Organization).filter(
+        Organization.organization_id == organization_id,
+        Organization.qr_generation_token == qr_generation_token
+    ).first()
+
+    #レコードが存在しない場合
+    if not organization:
+        raise HTTPException(status_code=404, detail="Invalid organization ID or token.")
+
+    #トークンの有効期限と状態をチェック
+    if not organization.token_status:
+        raise HTTPException(status_code=400, detail="Token is inactive.")
+    if organization.token_expiry_date:
+        token_expiry_date_aware = japan_timezone.localize(organization.token_expiry_date)
+        if token_expiry_date_aware < datetime.now(japan_timezone):
+            raise HTTPException(status_code=400, detail="Token has expired.")
+
+    #トークンが有効
+    return {"status": "valid", "organization_name": organization.organization_name}
 
 # main.pyに追加
 @app.get("/test")
