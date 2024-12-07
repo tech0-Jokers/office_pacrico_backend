@@ -1058,13 +1058,17 @@ def get_or_generate_token(organization_id: int, db: Session = Depends(get_db)):
         "token": new_token
     }
 
+class ValidateTokenRequest(BaseModel):
+    organization_id: int
+    qr_generation_token: str
+
 # トークン有効性チェックAPI
 @app.post("/validate-token/")
-def validate_token(organization_id: int, qr_generation_token: str, db: Session = Depends(get_db)):
-    #対応するレコードを取得
+def validate_token(request: ValidateTokenRequest, db: Session = Depends(get_db)):
+    # データベースから組織情報を取得
     organization = db.query(Organization).filter(
-        Organization.organization_id == organization_id,
-        Organization.qr_generation_token == qr_generation_token
+        Organization.organization_id == request.organization_id,
+        Organization.qr_generation_token == request.qr_generation_token
     ).first()
 
     #レコードが存在しない場合
