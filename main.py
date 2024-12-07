@@ -1058,6 +1058,28 @@ def get_or_generate_token(organization_id: int, db: Session = Depends(get_db)):
         "token": new_token
     }
 
+# トークン有効性チェックAPI
+@app.post("/validate-token/")
+def validate_token(organization_id: int, qr_generation_token: str, db: Session = Depends(get_db)):
+    #対応するレコードを取得
+    organization = db.query(Organization).filter(
+        Organization.organization_id == organization_id,
+        Organization.qr_generation_token == qr_generation_token
+    ).first()
+
+    #レコードが存在しない場合
+    if not organization:
+        raise HTTPException(status_code=404, detail="Invalid organization ID or token.")
+
+    #トークンの有効期限と状態をチェック
+    if not organization.token_status:
+        raise HTTPException(status_code=400, detail="Token is inactive.")
+    if organization.token_expiry_date and organization.token_expiry_date < datetime.now():
+        raise HTTPException(status_code=400, detail="Token has expired.")
+
+    #トークンが有効
+    return {"status": "valid", "organization_name": organization.organization_name}
+
 # main.pyに追加
 @app.get("/test")
 def test_endpoint():
