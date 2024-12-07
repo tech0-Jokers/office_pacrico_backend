@@ -1074,8 +1074,10 @@ def validate_token(organization_id: int, qr_generation_token: str, db: Session =
     #トークンの有効期限と状態をチェック
     if not organization.token_status:
         raise HTTPException(status_code=400, detail="Token is inactive.")
-    if organization.token_expiry_date and organization.token_expiry_date < datetime.now():
-        raise HTTPException(status_code=400, detail="Token has expired.")
+    if organization.token_expiry_date:
+        token_expiry_date_aware = japan_timezone.localize(organization.token_expiry_date)
+        if token_expiry_date_aware < datetime.now(japan_timezone):
+            raise HTTPException(status_code=400, detail="Token has expired.")
 
     #トークンが有効
     return {"status": "valid", "organization_name": organization.organization_name}
