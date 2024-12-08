@@ -723,15 +723,21 @@ def get_messages(organization_id: int, db: Session = Depends(get_db)):
             ReplyComments,
             sender_alias.user_name.label("sender_user_name"),
             receiver_alias.user_name.label("receiver_user_name"),
-            comment_user_alias.user_name.label("comment_user_name")  # コメントユーザー名を取得
+            comment_user_alias.user_name.label("comment_user_name"),  # コメントユーザー名を取得
         )
         .join(sender_alias, Message.sender_user_id == sender_alias.user_id)
         .join(receiver_alias, Message.receiver_user_id == receiver_alias.user_id)
         .join(IntegratedProduct, Message.product_id == IntegratedProduct.product_id)
-        .outerjoin(IndependentProductMaster, IntegratedProduct.independent_product_id == IndependentProductMaster.independent_product_id)
-        .outerjoin(MeitexProductMaster, IntegratedProduct.meitex_product_id == MeitexProductMaster.meitex_product_id)
+        .outerjoin(
+            IndependentProductMaster,
+            IntegratedProduct.independent_product_id == IndependentProductMaster.independent_product_id,
+        )
+        .outerjoin(
+            MeitexProductMaster,
+            IntegratedProduct.meitex_product_id == MeitexProductMaster.meitex_product_id,
+        )
         .outerjoin(ReplyComments, ReplyComments.message_id == Message.message_id)
-        .outerjoin(comment_user_alias, ReplyComments.comment_user_id == comment_user_alias.user_id)  # コメントユーザーと結合
+        .outerjoin(comment_user_alias, ReplyComments.comment_user_id == comment_user_alias.user_id)
         .filter(sender_alias.organization_id == organization_id)
         .filter(receiver_alias.organization_id == organization_id)
         .order_by(ReplyComments.reply_comment_id.asc())  # reply_comment_idの昇順でソート
@@ -740,7 +746,7 @@ def get_messages(organization_id: int, db: Session = Depends(get_db)):
 
     if not messages:
         raise HTTPException(status_code=404, detail="No messages found for this organization")
-    
+
     # メッセージごとのデータを構造化
     result = {}
     for message in messages:
@@ -750,41 +756,55 @@ def get_messages(organization_id: int, db: Session = Depends(get_db)):
                 "message_id": message.Message.message_id,
                 "sender_user_id": message.Message.sender_user_id,
                 "sender_user_name": message.sender_user_name,
+                "sender_user_name_manual_input": message.Message.sender_user_name_manual_input,  # 手入力の送信者名
                 "receiver_user_id": message.Message.receiver_user_id,
                 "receiver_user_name": message.receiver_user_name,
+                "receiver_user_name_manual_input": message.Message.receiver_user_name_manual_input,  # 手入力の受信者名
                 "message_content": message.Message.message_content,
                 "product_id": message.Message.product_id,
                 "product_name": (
                     message.IndependentProductMaster.product_name
-                    if message.IndependentProductMaster else None
-                ) or (
+                    if message.IndependentProductMaster
+                    else None
+                )
+                or (
                     message.MeitexProductMaster.product_name
-                    if message.MeitexProductMaster else None
+                    if message.MeitexProductMaster
+                    else None
                 ),
                 "product_image_url": (
                     message.IndependentProductMaster.product_image_url
-                    if message.IndependentProductMaster else None
-                ) or (
+                    if message.IndependentProductMaster
+                    else None
+                )
+                or (
                     message.MeitexProductMaster.product_image_url
-                    if message.MeitexProductMaster else None
+                    if message.MeitexProductMaster
+                    else None
                 ),
-                "send_date": message.Message.send_date.isoformat() if message.Message.send_date else None,
+                "send_date": message.Message.send_date.isoformat()
+                if message.Message.send_date
+                else None,
                 "reply_comments": [],
-                "count_of_likes": message.Message.count_of_likes
+                "count_of_likes": message.Message.count_of_likes,
             }
-        
+
         # コメントを追加
         if message.ReplyComments:
-            result[message_id]["reply_comments"].append({
-                "reply_comment_id": message.ReplyComments.reply_comment_id,
-                "comment_user_id": message.ReplyComments.comment_user_id,
-                "comment_user_name": message.comment_user_name,  # コメントしたユーザーの名前を追加
-                "message_content": message.ReplyComments.message_content,
-                "send_date": message.ReplyComments.send_date.isoformat() if message.ReplyComments.send_date else None
-            })
-    
-    return {"messages": list(result.values())}
+            result[message_id]["reply_comments"].append(
+                {
+                    "reply_comment_id": message.ReplyComments.reply_comment_id,
+                    "comment_user_id": message.ReplyComments.comment_user_id,
+                    "comment_user_name": message.comment_user_name,
+                    "comment_user_name_manual_input": message.ReplyComments.comment_user_name_manual_input,  # 手入力のコメントユーザー名
+                    "message_content": message.ReplyComments.message_content,
+                    "send_date": message.ReplyComments.send_date.isoformat()
+                    if message.ReplyComments.send_date
+                    else None,
+                }
+            )
 
+    return {"messages": list(result.values())}
 
 #指定された組織IDに紐づくメッセージの回数を取得するエンドポイント
 @app.get("/send_messages/count/", tags=["DashBoard"])
