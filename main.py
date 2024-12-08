@@ -315,6 +315,12 @@ class IncomingRegisterRequest(BaseModel):
 class UpdatePriceRequest(BaseModel):
     sales_amount: float
 
+class CommentRequest(BaseModel):
+    message_id: int
+    comment_user_id: int
+    comment_user_name_manual_input: str
+    message_content: str
+
 # ルートエンドポイント: こんにちはを表示
 @app.get("/")
 def read_root():
@@ -899,13 +905,13 @@ def add_message(message_data: MessageCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="メッセージを追加できませんでした")
 
 @app.post("/add_comments/", tags=["Message Operations"])
-def add_comment(message_id: int, comment_user_id: int, message_content: str, comment_user_name_manual_input: str, db: Session = Depends(get_db)):
+def add_comment(request: CommentRequest, db: Session = Depends(get_db)):
     # 新しいコメントを作成
     new_comment = ReplyComments(
-        message_id=message_id,
-        comment_user_id=comment_user_id,
-        comment_user_name_manual_input=comment_user_name_manual_input,
-        message_content=message_content,
+        message_id=request.message_id,
+        comment_user_id=request.comment_user_id,
+        comment_user_name_manual_input=request.comment_user_name_manual_input,
+        message_content=request.message_content,
         send_date=datetime.now(japan_timezone)
     )
     db.add(new_comment)
