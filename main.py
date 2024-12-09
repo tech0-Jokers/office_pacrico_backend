@@ -1039,7 +1039,7 @@ def purchase_products(purchase_request: PurchaseRequest, db: Session = Depends(g
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
 
 #トークン取得・生成エンドポイント
-@app.get("/get_token/{organization_id}")
+@app.get("/get_token/{organization_id}", tags=["Token"])
 def get_or_generate_token(organization_id: int, db: Session = Depends(get_db)):
     # データベースから該当する組織を検索
     organization = db.query(Organization).filter(Organization.organization_id == organization_id).first()
@@ -1089,7 +1089,7 @@ class ValidateTokenRequest(BaseModel):
     qr_generation_token: str
 
 # トークン有効性チェックAPI
-@app.post("/validate-token/")
+@app.post("/validate-token/", tags=["Token"])
 def validate_token(request: ValidateTokenRequest, db: Session = Depends(get_db)):
     # データベースから組織情報を取得
     organization = db.query(Organization).filter(
