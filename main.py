@@ -1089,7 +1089,8 @@ class ValidateTokenRequest(BaseModel):
     qr_generation_token: str
 
 # トークン有効性チェックAPI
-@app.post("/validate-token/", tags=["Token"])
+@app.post("/validate-token")
+@app.post("/validate-token/")
 def validate_token(request: ValidateTokenRequest, db: Session = Depends(get_db)):
     # データベースから組織情報を取得
     organization = db.query(Organization).filter(
