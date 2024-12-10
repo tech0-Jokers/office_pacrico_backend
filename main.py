@@ -15,7 +15,7 @@ from create_db import Product, IncomingInfo, IncomingProduct
 from sqlalchemy import create_engine, Column, Integer, String, select, DECIMAL, ForeignKey, Boolean, DateTime, Date, Text, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session ,aliased
+from sqlalchemy.orm import sessionmaker, Session ,aliased, relationship
 
 from azure.storage.blob import BlobServiceClient,ContentSettings
 import uuid
@@ -213,6 +213,10 @@ class Message(Base):
     message_content = Column(Text, nullable=True) 
     send_date = Column(DateTime, nullable=False, default=lambda: datetime.now(japan_timezone))  #デフォルトを日本時間に設定
     count_of_likes = Column(Integer, default=0)
+
+     # リレーションを追加
+    sender = relationship("UserInformation", foreign_keys=[sender_user_id], lazy="joined")
+    receiver = relationship("UserInformation", foreign_keys=[receiver_user_id], lazy="joined")
 
 class UserInformation(Base):
     __tablename__ = "userinformation"
@@ -1112,6 +1116,32 @@ def validate_token(request: ValidateTokenRequest, db: Session = Depends(get_db))
 
     #トークンが有効
     return {"status": "valid", "organization_name": organization.organization_name}
+
+@app.get("/api/messages/", tags=["DashBoard"])
+def get_latest_messages(organization_id: int, db: Session = Depends(get_db)):
+    #最新の3件のメッセージを取得
+    messages = (
+        db.query(Message)
+        .join(UserInformation, Message.sender_user_id == UserInformation.user_id)
+        .filter(UserInformation.organization_id == organization_id)
+        .order_by(Message.send_date.desc())
+        .limit(3)
+        .all()
+    )
+
+    #結果を整形しつつ格納
+    result = [
+        {
+            "send_date": message.send_date.strftime("%Y-%m-%d %H:%M"),
+            "sender_name": message.sender_user_name_manual_input or message.sender.user_name,  # 手動入力を優先
+            "receiver_name": message.receiver_user_name_manual_input or message.receiver.user_name,  # 手動入力を優先
+            "message_content": message.message_content,
+        }
+        for message in messages
+    ]
+
+    return result
+
 
 # main.pyに追加
 @app.get("/test")
