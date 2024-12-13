@@ -331,6 +331,10 @@ class MessageCountResponse(BaseModel):
     sender_name: str
     message_count: int
 
+class ReceiverMessageCountResponse(BaseModel):
+    receiver_name: str
+    message_count: int
+
 # ルートエンドポイント: こんにちはを表示
 @app.get("/")
 def read_root():
@@ -1177,7 +1181,7 @@ def get_message_send_count(
             #既存の名前に類似している場合はそのグループに追加
             added = False
             for existing_name in name_counts:
-                if fuzz.ratio(name, existing_name) > 70:  #類似度の閾値、今は仮で70%で設定
+                if fuzz.ratio(name, existing_name) > 60:  #類似度の閾値、今は仮で60%で設定
                     name_counts[existing_name] += count
                     added = True
                     break
@@ -1189,6 +1193,58 @@ def get_message_send_count(
         sorted_results = sorted(
             [
                 {"sender_name": name, "message_count": count}
+                for name, count in name_counts.items()
+            ],
+            key=lambda x: x["message_count"],
+            reverse=True
+        )[:5]
+
+        return sorted_results
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/messages/receive", response_model=List[ReceiverMessageCountResponse], tags=["DashBoard"])
+def get_message_receive_count(
+    organization_id: int = Query(...), 
+    db: Session = Depends(get_db)
+):
+    try:
+        # データベースからメッセージ受信データを取得
+        raw_results = (
+            db.query(
+                Message.receiver_user_name_manual_input.label("manual_name"),
+                UserInformation.user_name.label("default_name"),
+                func.count(Message.message_id).label("message_count")
+            )
+            .join(UserInformation, Message.receiver_user_id == UserInformation.user_id)
+            .filter(UserInformation.organization_id == organization_id)
+            .group_by(Message.receiver_user_name_manual_input, UserInformation.user_name)
+            .order_by(desc("message_count"))
+            .all()
+        )
+
+        #名前ごとにカウントを集約
+        name_counts = {}
+        for result in raw_results:
+            name = result.manual_name or result.default_name  
+            count = result.message_count
+
+            #既存の名前に類似している場合はそのグループに追加
+            added = False
+            for existing_name in name_counts:
+                if fuzz.ratio(name, existing_name) > 60:  
+                    name_counts[existing_name] += count
+                    added = True
+                    break
+
+            if not added:
+                name_counts[name] = count
+
+        # 結果を降順にソートしてトップ5を返却
+        sorted_results = sorted(
+            [
+                {"receiver_name": name, "message_count": count}
                 for name, count in name_counts.items()
             ],
             key=lambda x: x["message_count"],
