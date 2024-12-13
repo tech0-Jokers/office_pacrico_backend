@@ -12,12 +12,14 @@ from typing import Optional, List
 from pydantic import BaseModel  # Pydanticモデルをインポート
 from create_db import Product, IncomingInfo, IncomingProduct
 
-from sqlalchemy import create_engine, Column, Integer, String, select, DECIMAL, ForeignKey, Boolean, DateTime, Date, Text, func
+from sqlalchemy import create_engine, Column, Integer, String, select, DECIMAL, ForeignKey, Boolean, DateTime, Date, Text, func, desc
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session ,aliased, relationship
 
 from azure.storage.blob import BlobServiceClient,ContentSettings
+from rapidfuzz import fuzz
+
 import uuid
 
 import jwt
@@ -324,6 +326,10 @@ class CommentRequest(BaseModel):
     comment_user_id: int
     comment_user_name_manual_input: str
     message_content: str
+
+class MessageCountResponse(BaseModel):
+    sender_name: str
+    message_count: int
 
 # ルートエンドポイント: こんにちはを表示
 @app.get("/")
@@ -1142,11 +1148,57 @@ def get_latest_messages(organization_id: int, db: Session = Depends(get_db)):
 
     return result
 
+@app.get("/api/messages/send", response_model=List[MessageCountResponse], tags=["DashBoard"])
+def get_message_send_count(
+    organization_id: int = Query(...), 
+    db: Session = Depends(get_db)
+):
+    try:
+        #データベースからメッセージ送信データを取得
+        raw_results = (
+            db.query(
+                Message.sender_user_name_manual_input.label("manual_name"),
+                UserInformation.user_name.label("default_name"),
+                func.count(Message.message_id).label("message_count")
+            )
+            .join(UserInformation, Message.sender_user_id == UserInformation.user_id)
+            .filter(UserInformation.organization_id == organization_id)
+            .group_by(Message.sender_user_name_manual_input, UserInformation.user_name)
+            .order_by(desc("message_count"))
+            .all()
+        )
 
-# main.pyに追加
-@app.get("/test")
-def test_endpoint():
-    return {"message": "Test endpoint"}
+        #名前ごとにカウントを集約
+        name_counts = {}
+        for result in raw_results:
+            name = result.manual_name or result.default_name  #手動入力名を優先
+            count = result.message_count
+
+            #既存の名前に類似している場合はそのグループに追加
+            added = False
+            for existing_name in name_counts:
+                if fuzz.ratio(name, existing_name) > 70:  #類似度の閾値、今は仮で70%で設定
+                    name_counts[existing_name] += count
+                    added = True
+                    break
+
+            if not added:
+                name_counts[name] = count
+
+        # 結果を降順にソートしてトップ5を返却
+        sorted_results = sorted(
+            [
+                {"sender_name": name, "message_count": count}
+                for name, count in name_counts.items()
+            ],
+            key=lambda x: x["message_count"],
+            reverse=True
+        )[:5]
+
+        return sorted_results
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # アプリケーションの起動: 環境変数 PORT が指定されていればそれを使用
