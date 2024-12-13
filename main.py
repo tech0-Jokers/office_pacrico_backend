@@ -335,6 +335,10 @@ class ReceiverMessageCountResponse(BaseModel):
     receiver_name: str
     message_count: int
 
+class SnackRankingResponse(BaseModel):
+    product_name: str
+    purchase_count: int
+
 # ルートエンドポイント: こんにちはを表示
 @app.get("/")
 def read_root():
@@ -1256,6 +1260,52 @@ def get_message_receive_count(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+#お菓子購入ランキングに関するAPI
+@app.get("/api/snacks/ranking", response_model=List[SnackRankingResponse], tags=["DashBoard"])
+def get_snack_ranking(
+    organization_id: int = Query(...),
+    db: Session = Depends(get_db)
+):
+    try:
+        product_counts = (
+            db.query(
+                Message.product_id,
+                func.count(Message.message_id).label("purchase_count")
+            )
+            .join(UserInformation, Message.sender_user_id == UserInformation.user_id)  # UserInformationからorganization_idを取得
+            .filter(UserInformation.organization_id == organization_id)  # organization_idでフィルタ
+            .group_by(Message.product_id)
+            .order_by(desc("purchase_count"))
+            .all()
+        )
+
+        #product_idをもとにproduct_nameを特定
+        ranking = []
+        for product_id, purchase_count in product_counts[:3]:  #トップ3を取得
+            product_name = None
+
+            product = (
+                db.query(IntegratedProduct, MeitexProductMaster.product_name, IndependentProductMaster.product_name)
+                .outerjoin(MeitexProductMaster, IntegratedProduct.meitex_product_id == MeitexProductMaster.meitex_product_id)
+                .outerjoin(IndependentProductMaster, IntegratedProduct.independent_product_id == IndependentProductMaster.independent_product_id)
+                .filter(IntegratedProduct.product_id == product_id)
+                .first()
+            )
+
+
+            if product:
+                product_name = product[1] or product[2]  
+
+            if product_name:
+                ranking.append({
+                    "product_name": product_name,
+                    "purchase_count": purchase_count
+                })
+
+        return ranking
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # アプリケーションの起動: 環境変数 PORT が指定されていればそれを使用
 if __name__ == '__main__':
