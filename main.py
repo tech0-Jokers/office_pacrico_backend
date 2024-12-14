@@ -29,6 +29,7 @@ import io
 from fastapi.responses import StreamingResponse
 import matplotlib.pyplot as plt
 import base64
+from janome.tokenizer import Tokenizer
 
 # .env.local ファイルを明示的に指定して環境変数を読み込む
 load_dotenv(dotenv_path=".env.local")
@@ -1350,6 +1351,12 @@ def get_snack_wordcloud(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# 形態素解析の関数
+def split_into_words(text):
+    tokenizer = Tokenizer()
+    words = [token.surface for token in tokenizer.tokenize(text) if token.surface.strip()]
+    return words
+
 @app.get("/api/snacks/wordcloud/images", tags=["DashBoard"])
 def generate_wordclouds(
     organization_id: int = Query(...),
@@ -1368,13 +1375,17 @@ def generate_wordclouds(
         for product_name, messages in product_message_map.items():
             combined_text = " ".join(messages)
             
+            # テキストを単語に分割
+            words = split_into_words(combined_text)
+            processed_text = " ".join(words)  # 単語を空白で連結
+            
             # 日本語対応のフォントを指定
             wordcloud = WordCloud(
                 width=800,
                 height=400,
                 background_color="white",
                 font_path=font_path  # 環境変数や指定パスを使用
-            ).generate(combined_text)
+            ).generate(processed_text)
             
             # 画像をメモリに保存し、Base64に変換
             img_buffer = io.BytesIO()
