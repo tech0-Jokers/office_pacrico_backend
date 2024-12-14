@@ -28,6 +28,7 @@ from wordcloud import WordCloud
 import io
 from fastapi.responses import StreamingResponse
 import matplotlib.pyplot as plt
+import base64
 
 # .env.local ファイルを明示的に指定して環境変数を読み込む
 load_dotenv(dotenv_path=".env.local")
@@ -1362,7 +1363,7 @@ def generate_wordclouds(
         if not product_message_map:
             raise HTTPException(status_code=404, detail="No messages found for this organization_id.")
 
-        # ワードクラウド生成
+        # 商品ごとのワードクラウドを生成
         wordclouds = {}
         for product_name, messages in product_message_map.items():
             combined_text = " ".join(messages)
@@ -1372,26 +1373,20 @@ def generate_wordclouds(
                 width=800,
                 height=400,
                 background_color="white",
-                font_path = font_path
+                font_path=font_path  # 環境変数や指定パスを使用
             ).generate(combined_text)
             
-            # 画像をメモリに保存
+            # 画像をメモリに保存し、Base64に変換
             img_buffer = io.BytesIO()
-            plt.figure(figsize=(10, 5))
-            plt.imshow(wordcloud, interpolation="bilinear")
-            plt.axis("off")
-            plt.savefig(img_buffer, format="PNG")
+            wordcloud.to_image().save(img_buffer, format="PNG")
             img_buffer.seek(0)
+            img_base64 = base64.b64encode(img_buffer.read()).decode("utf-8")
+            
+            # 商品名をキーに画像データを保存
+            wordclouds[product_name] = img_base64
 
-            # 商品名ごとに画像を保存
-            wordclouds[product_name] = img_buffer
-
-        # デバッグ用：生成した商品名リスト
-        print(f"Generated wordclouds for: {list(wordclouds.keys())}")
-
-        # 一例として最初の商品を返却（フロントエンドでは商品選択ロジックを適用）
-        first_product_name = next(iter(wordclouds.keys()))
-        return StreamingResponse(wordclouds[first_product_name], media_type="image/png")
+        # JSON形式で全商品分のデータを返却
+        return {"wordclouds": wordclouds}
 
     except Exception as e:
         print(f"Error occurred: {e}")
