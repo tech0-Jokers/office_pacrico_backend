@@ -67,6 +67,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+#フォントパス
+font_path = os.path.join(os.path.dirname(__file__), "fonts", "ipaexg.ttf")
+
 # JWTの設定
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
@@ -1369,7 +1372,7 @@ def generate_wordclouds(
                 width=800,
                 height=400,
                 background_color="white",
-                font_path= r"C:\Users\LENOVO\Downloads\ipaexg00401\ipaexg00401\ipaexg.ttf"  # 日本語対応フォントを指定
+                font_path = font_path
             ).generate(combined_text)
             
             # 画像をメモリに保存
