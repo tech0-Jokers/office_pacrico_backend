@@ -24,6 +24,12 @@ import uuid
 
 import jwt
 
+from wordcloud import WordCloud
+import io
+from fastapi.responses import StreamingResponse
+import matplotlib.pyplot as plt
+import base64
+
 # .env.local ファイルを明示的に指定して環境変数を読み込む
 load_dotenv(dotenv_path=".env.local")
 
@@ -61,6 +67,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+#フォントパス
+font_path = os.path.join(os.path.dirname(__file__), "fonts", "ipaexg.ttf")
 
 # JWTの設定
 SECRET_KEY = os.getenv("SECRET_KEY")
@@ -1305,6 +1314,82 @@ def get_snack_ranking(
         return ranking
 
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/api/snacks/wordcloud", tags=["DashBoard"])
+def get_snack_wordcloud(
+    organization_id: int = Query(...),
+    db: Session = Depends(get_db)
+):
+    try:
+        # product_id, product_name, message_contentを取得
+        product_messages = (
+            db.query(
+                Message.product_id,
+                Message.message_content,
+                func.coalesce(MeitexProductMaster.product_name, IndependentProductMaster.product_name).label("product_name")
+            )
+            .join(UserInformation, Message.sender_user_id == UserInformation.user_id)
+            .outerjoin(IntegratedProduct, Message.product_id == IntegratedProduct.product_id)
+            .outerjoin(MeitexProductMaster, IntegratedProduct.meitex_product_id == MeitexProductMaster.meitex_product_id)
+            .outerjoin(IndependentProductMaster, IntegratedProduct.independent_product_id == IndependentProductMaster.independent_product_id)
+            .filter(UserInformation.organization_id == organization_id)
+            .all()
+        )
+
+        # product_nameごとにmessage_contentを集約
+        product_message_map = {}
+        for product_id, message_content, product_name in product_messages:
+            if product_name not in product_message_map:
+                product_message_map[product_name] = []
+            product_message_map[product_name].append(message_content)
+
+        return product_message_map
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/snacks/wordcloud/images", tags=["DashBoard"])
+def generate_wordclouds(
+    organization_id: int = Query(...),
+    db: Session = Depends(get_db)
+):
+    try:
+        # データ取得
+        product_message_map = get_snack_wordcloud(organization_id, db)
+
+        # データが存在しない場合
+        if not product_message_map:
+            raise HTTPException(status_code=404, detail="No messages found for this organization_id.")
+
+        # 商品ごとのワードクラウドを生成
+        wordclouds = {}
+        for product_name, messages in product_message_map.items():
+            combined_text = " ".join(messages)
+            
+            # 日本語対応のフォントを指定
+            wordcloud = WordCloud(
+                width=800,
+                height=400,
+                background_color="white",
+                font_path=font_path  # 環境変数や指定パスを使用
+            ).generate(combined_text)
+            
+            # 画像をメモリに保存し、Base64に変換
+            img_buffer = io.BytesIO()
+            wordcloud.to_image().save(img_buffer, format="PNG")
+            img_buffer.seek(0)
+            img_base64 = base64.b64encode(img_buffer.read()).decode("utf-8")
+            
+            # 商品名をキーに画像データを保存
+            wordclouds[product_name] = img_base64
+
+        # JSON形式で全商品分のデータを返却
+        return {"wordclouds": wordclouds}
+
+    except Exception as e:
+        print(f"Error occurred: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # アプリケーションの起動: 環境変数 PORT が指定されていればそれを使用
