@@ -1189,7 +1189,7 @@ def get_message_send_count(
         #名前ごとにカウントを集約
         name_counts = {}
         for result in raw_results:
-            name = result.manual_name or result.default_name  #手動入力名を優先
+            name = result.default_name or result.manual_name   #デフォルトネームを優先
             count = result.message_count
 
             #既存の名前に類似している場合はそのグループに追加
@@ -1241,7 +1241,7 @@ def get_message_receive_count(
         #名前ごとにカウントを集約
         name_counts = {}
         for result in raw_results:
-            name = result.manual_name or result.default_name  
+            name = result.default_name or result.manual_name  
             count = result.message_count
 
             #既存の名前に類似している場合はそのグループに追加
